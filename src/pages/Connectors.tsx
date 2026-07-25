@@ -8,7 +8,18 @@ import { Input, Select, Field, Textarea } from '@/components/ui/Input'
 import { Badge, StatusPill, Tone } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Switch } from '@/components/ui/Switch'
-import { connectors as seed, Connector, ConnectorType, toolsForConnector } from '@/lib/mock-data'
+import {
+  Connector,
+  ConnectorType,
+  allApis,
+  uniqueApiTypes,
+  uniqueAuthTypes,
+  totalTools,
+  connectorStatus,
+  connectorLastSync,
+  toolsForApi,
+} from '@/lib/mock-data'
+import { useConnectorsStore } from '@/lib/connectors-store'
 import { timeAgo } from '@/lib/utils'
 
 const typeTone: Record<ConnectorType, Tone> = {
@@ -30,7 +41,7 @@ function downloadJson(filename: string, data: unknown) {
 
 export default function Connectors() {
   const navigate = useNavigate()
-  const [items, setItems] = useState(seed)
+  const { connectors: items, addConnector, deleteConnector, setConnectorApisStatus } = useConnectorsStore()
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | ConnectorType>('all')
   const [openMenu, setOpenMenu] = useState<string | null>(null)
@@ -45,25 +56,38 @@ export default function Connectors() {
   const filtered = useMemo(
     () =>
       items.filter((c) => {
-        const matchesQuery = c.name.toLowerCase().includes(query.toLowerCase()) || c.baseUrl.toLowerCase().includes(query.toLowerCase())
-        const matchesType = typeFilter === 'all' || c.type === typeFilter
+        const q = query.toLowerCase()
+        const matchesQuery =
+          c.name.toLowerCase().includes(q) || allApis(c).some((a) => a.baseUrl.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
+        const matchesType = typeFilter === 'all' || uniqueApiTypes(c).includes(typeFilter)
         return matchesQuery && matchesType
       }),
     [items, query, typeFilter],
   )
 
   function confirmDelete() {
-    setItems((prev) => prev.filter((c) => c.id !== pendingDelete))
+    if (pendingDelete) deleteConnector(pendingDelete)
     setPendingDelete(null)
   }
 
   function exportSpec(c: Connector) {
     downloadJson(`${c.name.toLowerCase().replace(/\s+/g, '-')}.spec.json`, {
       name: c.name,
-      baseUrl: c.baseUrl,
-      type: c.type,
-      authType: c.authType,
-      tools: toolsForConnector(c).map(({ name, method, path }) => ({ name, method, path })),
+      description: c.description,
+      modules: c.modules.map((m) => ({
+        name: m.name,
+        description: m.description,
+        apis: m.apis.map((a) => ({
+          name: a.name,
+          type: a.type,
+          baseUrl: a.baseUrl,
+          authType: a.authType,
+          tools: toolsForApi(a).map((t) => ({
+            name: t.name,
+            ...(a.type === 'REST' ? { method: t.method, path: t.path } : { operation: t.operation, operationKind: t.operationKind }),
+          })),
+        })),
+      })),
     })
     setOpenMenu(null)
   }
@@ -72,17 +96,13 @@ export default function Connectors() {
     setOpenMenu(null)
     setCheckingId(c.id)
     setTimeout(() => {
-      setItems((prev) =>
-        prev.map((x) => (x.id === c.id ? { ...x, status: 'active', lastSync: new Date().toISOString() } : x)),
-      )
+      setConnectorApisStatus(c.id, 'active', true)
       setCheckingId(null)
     }, 900)
   }
 
-  function toggleActive(id: string) {
-    setItems((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: c.status === 'active' ? 'inactive' : 'active' } : c)),
-    )
+  function toggleActive(c: Connector) {
+    setConnectorApisStatus(c.id, connectorStatus(c) === 'active' ? 'inactive' : 'active')
   }
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -113,20 +133,35 @@ export default function Connectors() {
       }
     }
     const id = `con_import_${Date.now()}`
+    const moduleId = `${id}_mod_default`
+    const apiId = `${id}_api_default`
     const newConnector: Connector = {
       id,
       name: parsedName || 'Imported connector',
       glyph: (parsedName || 'IM').slice(0, 2).toUpperCase(),
       tint: 'signal',
-      baseUrl: parsedUrl,
-      type: 'REST',
-      authType: 'API Key',
-      toolCount: 5,
-      status: 'active',
-      lastSync: new Date().toISOString(),
-      callsToday: 0,
+      description: 'Imported from an OpenAPI/Swagger spec.',
+      modules: [{
+        id: moduleId,
+        name: 'General',
+        description: 'Default module created on import.',
+        apis: [{
+          id: apiId,
+          moduleId,
+          name: `${parsedName || 'Imported'} API`,
+          description: '',
+          type: 'REST',
+          baseUrl: parsedUrl,
+          authType: 'API Key',
+          hasCredentials: false,
+          toolCount: 5,
+          status: 'active',
+          lastSync: new Date().toISOString(),
+          callsToday: 0,
+        }],
+      }],
     }
-    setItems((prev) => [newConnector, ...prev])
+    addConnector(newConnector)
     setImportOpen(false)
     setImportText('')
     setImportName('')
@@ -165,7 +200,12 @@ export default function Connectors() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((c) => (
+        {filtered.map((c) => {
+          const types = uniqueApiTypes(c)
+          const auths = uniqueAuthTypes(c)
+          const status = connectorStatus(c)
+          const lastSync = connectorLastSync(c)
+          return (
           <Card key={c.id} className="group relative overflow-visible transition-colors hover:border-signal/30">
             <CardContent className="p-4">
               <Link to={`/connectors/${c.id}`} className="absolute inset-0 rounded-2xl" aria-label={`Open ${c.name}`} />
@@ -176,7 +216,7 @@ export default function Connectors() {
                   </span>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
-                    <p className="truncate text-[11px] text-faint">{c.baseUrl}</p>
+                    <p className="truncate text-[11px] text-faint">{c.description}</p>
                   </div>
                 </div>
                 <div className="pointer-events-auto relative z-20">
@@ -224,9 +264,10 @@ export default function Connectors() {
               </div>
 
               <div className="pointer-events-none mt-4 flex flex-wrap items-center gap-1.5">
-                <Badge tone={typeTone[c.type]}>{c.type}</Badge>
-                <Badge tone="neutral">{c.authType}</Badge>
-                <Badge tone="neutral">{c.toolCount} tools</Badge>
+                {types.length === 1 ? <Badge tone={typeTone[types[0]]}>{types[0]}</Badge> : <Badge tone="neutral">Mixed types</Badge>}
+                {auths.length === 1 ? <Badge tone="neutral">{auths[0]}</Badge> : <Badge tone="neutral">Mixed auth</Badge>}
+                <Badge tone="neutral">{totalTools(c)} tools</Badge>
+                {c.modules.length > 1 && <Badge tone="neutral">{c.modules.length} modules</Badge>}
               </div>
 
               <div className="pointer-events-none mt-4 flex items-center justify-between border-t border-border/10 pt-3">
@@ -234,16 +275,17 @@ export default function Connectors() {
                   className="pointer-events-auto relative z-20 flex items-center gap-2"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Switch checked={c.status === 'active'} onChange={() => toggleActive(c.id)} />
-                  <StatusPill tone={c.status === 'active' ? 'ok' : c.status === 'error' ? 'bad' : 'neutral'} dot={c.status !== 'active'}>
-                    {c.status}
+                  <Switch checked={status === 'active'} onChange={() => toggleActive(c)} />
+                  <StatusPill tone={status === 'active' ? 'ok' : status === 'error' ? 'bad' : 'neutral'} dot={status !== 'active'}>
+                    {status}
                   </StatusPill>
                 </div>
-                <span className="pointer-events-none text-[11px] text-faint">synced {timeAgo(c.lastSync)}</span>
+                <span className="pointer-events-none text-[11px] text-faint">{lastSync ? `synced ${timeAgo(lastSync)}` : 'never synced'}</span>
               </div>
             </CardContent>
           </Card>
-        ))}
+          )
+        })}
 
         <Link
           to="/connectors/new"

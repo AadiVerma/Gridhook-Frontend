@@ -5,7 +5,8 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
-import { auditLogs, connectors, LogStatus } from '@/lib/mock-data'
+import { auditLogs, LogStatus } from '@/lib/mock-data'
+import { useConnectorsStore } from '@/lib/connectors-store'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 12
@@ -17,6 +18,7 @@ const statusTone: Record<LogStatus, 'ok' | 'bad' | 'warn'> = {
 }
 
 export default function AuditLog() {
+  const { connectors } = useConnectorsStore()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | LogStatus>('all')
   const [connector, setConnector] = useState('all')

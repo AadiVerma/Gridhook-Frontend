@@ -6,16 +6,18 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { StatusPill } from '@/components/ui/Badge'
-import { connectors, dailyInvocations, topTools } from '@/lib/mock-data'
+import { dailyInvocations, topTools, connectorStatus, totalTools, totalCallsToday, connectorLastSync } from '@/lib/mock-data'
+import { useConnectorsStore } from '@/lib/connectors-store'
 import { timeAgo } from '@/lib/utils'
 import { useState } from 'react'
 
 export default function Dashboard() {
   const [copied, setCopied] = useState(false)
-  const activeConnectors = connectors.filter((c) => c.status === 'active').length
-  const totalTools = connectors.reduce((s, c) => s + c.toolCount, 0)
-  const callsToday = connectors.reduce((s, c) => s + c.callsToday, 0)
-  const errored = connectors.filter((c) => c.status === 'error').length
+  const { connectors } = useConnectorsStore()
+  const activeConnectors = connectors.filter((c) => connectorStatus(c) === 'active').length
+  const toolTotal = connectors.reduce((s, c) => s + totalTools(c), 0)
+  const callsToday = connectors.reduce((s, c) => s + totalCallsToday(c), 0)
+  const errored = connectors.filter((c) => connectorStatus(c) === 'error').length
 
   function copyEndpoint() {
     setCopied(true)
@@ -36,7 +38,7 @@ export default function Dashboard() {
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Active connectors" value={String(activeConnectors)} icon={<Plug size={16} />} trend="+2 this week" trendTone="ok" />
-        <StatCard label="MCP tools" value={String(totalTools)} icon={<Wrench size={16} />} trend="+9 this week" trendTone="ok" />
+        <StatCard label="MCP tools" value={String(toolTotal)} icon={<Wrench size={16} />} trend="+9 this week" trendTone="ok" />
         <StatCard label="Invocations / 24h" value={callsToday.toLocaleString()} icon={<Activity size={16} />} trend="+12.4%" trendTone="ok" />
         <StatCard label="Errors / 24h" value={String(errored)} icon={<AlertTriangle size={16} />} trend={errored > 0 ? 'needs attention' : 'all clear'} trendTone={errored > 0 ? 'bad' : 'ok'} />
       </div>
@@ -149,7 +151,10 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="divide-y divide-border/10">
-            {connectors.slice(0, 5).map((c) => (
+            {connectors.slice(0, 5).map((c) => {
+              const status = connectorStatus(c)
+              const lastSync = connectorLastSync(c)
+              return (
               <Link
                 key={c.id}
                 to="/connectors"
@@ -160,15 +165,16 @@ export default function Dashboard() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">{c.name}</p>
-                  <p className="truncate text-[11px] text-faint">{c.baseUrl}</p>
+                  <p className="truncate text-[11px] text-faint">{c.description}</p>
                 </div>
-                <span className="hidden text-xs text-muted sm:block">{c.toolCount} tools</span>
-                <span className="hidden text-xs text-faint sm:block">{timeAgo(c.lastSync)}</span>
-                <StatusPill tone={c.status === 'active' ? 'ok' : c.status === 'error' ? 'bad' : 'neutral'}>
-                  {c.status}
+                <span className="hidden text-xs text-muted sm:block">{totalTools(c)} tools</span>
+                <span className="hidden text-xs text-faint sm:block">{lastSync ? timeAgo(lastSync) : 'never'}</span>
+                <StatusPill tone={status === 'active' ? 'ok' : status === 'error' ? 'bad' : 'neutral'}>
+                  {status}
                 </StatusPill>
               </Link>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>

@@ -8,7 +8,8 @@ import { Input, Textarea, Field } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
 import { Badge, StatusPill } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
-import { connectors, mcpServers, mcpClients } from '@/lib/mock-data'
+import { mcpServers, mcpClients, totalTools, allApis, allTools } from '@/lib/mock-data'
+import { useConnectorsStore } from '@/lib/connectors-store'
 
 const clientIcons: Record<string, any> = {
   cursor: Terminal,
@@ -24,6 +25,7 @@ const clientIcons: Record<string, any> = {
 
 export default function McpServerDetail() {
   const { id } = useParams()
+  const { connectors } = useConnectorsStore()
   const server = mcpServers.find((s) => s.id === id) ?? mcpServers[0]
   const [copied, setCopied] = useState(false)
   const [assigned, setAssigned] = useState<string[]>(server.connectorIds)
@@ -45,7 +47,7 @@ export default function McpServerDetail() {
 
   const activeTools = connectors
     .filter((c) => assigned.includes(c.id))
-    .flatMap((c) => Array.from({ length: Math.min(3, c.toolCount) }, (_, i) => `${c.name.toLowerCase().replace(/\s+/g, '_')}_${i + 1}`))
+    .flatMap((c) => allTools(c).slice(0, 3).map((t) => t.name))
 
   return (
     <AppShell title={server.name} subtitle={`/${server.slug}`} backTo="/mcp-servers">
@@ -87,7 +89,7 @@ export default function McpServerDetail() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-ink">{c.name}</p>
-                    <p className="truncate text-[11px] text-faint">{c.toolCount} tools available</p>
+                    <p className="truncate text-[11px] text-faint">{totalTools(c)} tools across {allApis(c).length} api(s)</p>
                   </div>
                   <Switch checked={assigned.includes(c.id)} onChange={() => toggleConnector(c.id)} />
                 </div>
