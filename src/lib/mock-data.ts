@@ -809,11 +809,11 @@ export interface OrgUser {
 }
 
 export const orgUsers: OrgUser[] = [
-  { id: 'u1', name: 'Aditya Verma', email: 'aditya.verma@procol.in', role: 'Owner', status: 'active', lastActive: '2026-07-25T07:05:00Z' },
-  { id: 'u2', name: 'Priya Nair', email: 'priya.nair@procol.in', role: 'Admin', status: 'active', lastActive: '2026-07-25T02:20:00Z' },
-  { id: 'u3', name: 'Marcus Lee', email: 'marcus.lee@procol.in', role: 'Developer', status: 'active', lastActive: '2026-07-24T19:40:00Z' },
-  { id: 'u4', name: 'Sara Ahmed', email: 'sara.ahmed@procol.in', role: 'Developer', status: 'invited', lastActive: '2026-07-22T09:00:00Z' },
-  { id: 'u5', name: 'Ilya Petrov', email: 'ilya.petrov@procol.in', role: 'Viewer', status: 'active', lastActive: '2026-07-20T14:12:00Z' },
+  { id: 'u1', name: 'Aditya Verma', email: 'aditya.verma@ark.in', role: 'Owner', status: 'active', lastActive: '2026-07-25T07:05:00Z' },
+  { id: 'u2', name: 'Priya Nair', email: 'priya.nair@ark.in', role: 'Admin', status: 'active', lastActive: '2026-07-25T02:20:00Z' },
+  { id: 'u3', name: 'Marcus Lee', email: 'marcus.lee@ark.in', role: 'Developer', status: 'active', lastActive: '2026-07-24T19:40:00Z' },
+  { id: 'u4', name: 'Sara Ahmed', email: 'sara.ahmed@ark.in', role: 'Developer', status: 'invited', lastActive: '2026-07-22T09:00:00Z' },
+  { id: 'u5', name: 'Ilya Petrov', email: 'ilya.petrov@ark.in', role: 'Viewer', status: 'active', lastActive: '2026-07-20T14:12:00Z' },
 ]
 
 export const roles = [

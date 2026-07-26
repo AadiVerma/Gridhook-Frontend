@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Field, Select } from '@/components/ui/Input'
@@ -15,10 +16,10 @@ export default function Organization() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Organization name">
-              <Input defaultValue="Procol Workspace" />
+              <Input defaultValue="ARK Workspace" />
             </Field>
             <Field label="Workspace slug">
-              <Input defaultValue="procol" />
+              <Input defaultValue="ARK" />
             </Field>
           </div>
           <Field label="Default timezone">
@@ -30,7 +31,7 @@ export default function Organization() {
           </Field>
         </CardContent>
         <CardFooter className="justify-end border-t border-border/10 pt-4">
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => toast.success('Organization settings saved')}>
             Save changes
           </Button>
         </CardFooter>

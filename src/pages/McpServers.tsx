@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, Plus, Server, Copy, Check, Users } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -27,6 +28,7 @@ export default function McpServers() {
   function copy(id: string, text: string) {
     navigator.clipboard?.writeText(text).catch(() => {})
     setCopiedId(id)
+    toast.success('Endpoint copied')
     setTimeout(() => setCopiedId(null), 1500)
   }
 
@@ -108,7 +110,7 @@ export default function McpServers() {
             <Button variant="secondary" size="sm" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" disabled={!name} onClick={() => setCreateOpen(false)}>
+            <Button variant="primary" size="sm" disabled={!name} onClick={() => { setCreateOpen(false); toast.success(`Server "${name}" created`) }}>
               Create server
             </Button>
           </div>

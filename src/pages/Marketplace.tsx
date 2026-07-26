@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Search, ExternalLink, Wrench, Download, ArrowRight, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -148,7 +149,7 @@ export default function Marketplace() {
               <Button variant="secondary" size="sm" onClick={() => setInstallStep('auth')}>
                 Back
               </Button>
-              <Button variant="primary" size="sm" onClick={() => setInstallStep('done')}>
+              <Button variant="primary" size="sm" onClick={() => { setInstallStep('done'); toast.success('Adapter installed') }}>
                 Install adapter
               </Button>
             </div>

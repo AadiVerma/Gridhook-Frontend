@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Globe, Database, Braces, FileCode2, Check, Plus, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -154,6 +155,7 @@ export default function ConnectorNew() {
       }),
     }
     addConnector(connector)
+    toast.success(`"${name}" created`)
     navigate(`/connectors/${connectorId}`)
   }
 

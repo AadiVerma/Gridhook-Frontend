@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Plus, MoreVertical } from 'lucide-react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge, StatusPill } from '@/components/ui/Badge'
@@ -62,7 +63,7 @@ export default function Users() {
             <Button variant="secondary" size="sm" onClick={() => setInviteOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={() => setInviteOpen(false)}>
+            <Button variant="primary" size="sm" onClick={() => { setInviteOpen(false); toast.success('Invite sent') }}>
               Send invite
             </Button>
           </div>

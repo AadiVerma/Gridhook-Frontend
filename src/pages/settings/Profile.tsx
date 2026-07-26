@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Field } from '@/components/ui/Input'
@@ -31,12 +32,12 @@ export default function Profile() {
               <Input defaultValue="Aditya Verma" />
             </Field>
             <Field label="Email">
-              <Input defaultValue="aditya.verma@procol.in" type="email" />
+              <Input defaultValue="aditya.verma@ark.in" type="email" />
             </Field>
           </div>
         </CardContent>
         <CardFooter className="justify-end border-t border-border/10 pt-4">
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => toast.success('Profile updated')}>
             Save changes
           </Button>
         </CardFooter>
@@ -63,7 +64,7 @@ export default function Profile() {
           </div>
         </CardContent>
         <CardFooter className="justify-end border-t border-border/10 pt-4">
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => toast.success('Password updated')}>
             Update password
           </Button>
         </CardFooter>

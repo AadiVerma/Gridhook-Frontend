@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plug, Plus, Search, Upload, Download, Trash2, MoreVertical, RefreshCw, Store, FileJson, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -66,7 +67,11 @@ export default function Connectors() {
   )
 
   function confirmDelete() {
-    if (pendingDelete) deleteConnector(pendingDelete)
+    if (pendingDelete) {
+      const name = items.find((c) => c.id === pendingDelete)?.name ?? 'Connector'
+      deleteConnector(pendingDelete)
+      toast.success(`"${name}" deleted`)
+    }
     setPendingDelete(null)
   }
 
@@ -98,6 +103,7 @@ export default function Connectors() {
     setTimeout(() => {
       setConnectorApisStatus(c.id, 'active', true)
       setCheckingId(null)
+      toast.success(`"${c.name}" health check passed`)
     }, 900)
   }
 
@@ -165,6 +171,7 @@ export default function Connectors() {
     setImportOpen(false)
     setImportText('')
     setImportName('')
+    toast.success(`"${parsedName}" imported`)
     navigate(`/connectors/${id}`)
   }
 

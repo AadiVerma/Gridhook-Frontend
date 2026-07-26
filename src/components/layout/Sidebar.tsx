@@ -16,7 +16,13 @@ import {
 } from 'lucide-react'
 import { Logo } from './Logo'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/lib/auth-store'
 import { useState } from 'react'
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
+}
 
 const groups = [
   {
@@ -75,6 +81,7 @@ function NavItem({ to, label, icon: Icon, end, onNavigate }: any) {
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
+  const { user, org, logout } = useAuth()
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
   return (
@@ -109,11 +116,11 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-raised/60"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-signal to-violet text-[11px] font-bold text-white">
-              PC
+              {initials(user?.name ?? org?.name ?? '?')}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-ink">Procol Workspace</span>
-              <span className="block truncate text-[10px] text-faint">aditya.verma@procol.in</span>
+              <span className="block truncate text-xs font-medium text-ink">{org?.name ?? 'Workspace'}</span>
+              <span className="block truncate text-[10px] text-faint">{user?.email ?? ''}</span>
             </span>
             <ChevronsUpDown size={14} className="shrink-0 text-faint" />
           </button>
@@ -123,6 +130,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               <button
                 onClick={() => {
                   setSwitcherOpen(false)
+                  logout()
                   navigate('/login')
                 }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted transition-colors hover:bg-canvas/60 hover:text-bad"

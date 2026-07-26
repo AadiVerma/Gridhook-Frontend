@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Plus, Wrench, Play, Trash2, Settings2, Pencil, Check, X, ChevronRight, Upload, FileJson } from 'lucide-react'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -253,6 +254,7 @@ export default function ConnectorDetail() {
     })
     if (editModuleId !== editingApi.moduleId) moveApi(connector.id, editingApi.id, editModuleId)
     setEditingApi(null)
+    toast.success('API settings saved')
   }
 
   function saveNewModule() {
@@ -265,6 +267,7 @@ export default function ConnectorDetail() {
     setNewModuleName('')
     setNewModuleDescription('')
     setModuleModalOpen(false)
+    toast.success(`Module "${newModuleName}" added`)
   }
 
   function openNewApi(moduleId: string) {
@@ -312,6 +315,7 @@ export default function ConnectorDetail() {
       callsToday: 0,
     })
     setNewApiModuleId(null)
+    toast.success(`API "${newApiName}" added`)
   }
 
   function runTool(api: Api, t: ConnectorTool) {
@@ -364,6 +368,7 @@ export default function ConnectorDetail() {
       [apiId]: prev[apiId].map((t) => (t.id === tool.id ? { ...t, ...patch } : t)),
     }))
     setViewingTool(null)
+    toast.success('Tool updated')
   }
 
   function confirmDeleteTool() {
@@ -371,6 +376,7 @@ export default function ConnectorDetail() {
     const { apiId, tool } = pendingDeleteTool
     setToolsByApi((prev) => ({ ...prev, [apiId]: prev[apiId].filter((t) => t.id !== tool.id) }))
     setPendingDeleteTool(null)
+    toast.success(`Tool "${tool.name}" deleted`)
   }
 
   function saveTool() {
@@ -395,6 +401,7 @@ export default function ConnectorDetail() {
       ],
     }))
     setEditorOpen(false)
+    toast.success(`Tool "${toolName}" created`)
   }
 
   function openImportTools(apiId: string) {
@@ -451,6 +458,7 @@ export default function ConnectorDetail() {
     const toImport = importToolsPreview.filter((_, i) => importToolsSelected.has(i)).map((op, i) => operationToTool(op, apiId, i))
     setToolsByApi((prev) => ({ ...prev, [apiId]: [...(prev[apiId] ?? []), ...toImport] }))
     setImportToolsApiId(null)
+    toast.success(`${toImport.length} tool${toImport.length === 1 ? '' : 's'} imported`)
   }
 
   return (
