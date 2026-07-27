@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/Switch'
 import { Badge, StatusPill } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { mcpServers, mcpClients, totalTools, allApis, allTools } from '@/lib/mock-data'
-import { useConnectorsStore } from '@/lib/connectors-store'
+import { useConnectorDrafts } from '@/lib/connector-drafts-store'
 
 const clientIcons: Record<string, any> = {
   cursor: Terminal,
@@ -25,7 +25,7 @@ const clientIcons: Record<string, any> = {
 
 export default function McpServerDetail() {
   const { id } = useParams()
-  const { connectors } = useConnectorsStore()
+  const { connectors } = useConnectorDrafts()
   const server = mcpServers.find((s) => s.id === id) ?? mcpServers[0]
   const [copied, setCopied] = useState(false)
   const [assigned, setAssigned] = useState<string[]>(server.connectorIds)

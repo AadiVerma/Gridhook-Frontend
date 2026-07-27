@@ -3,6 +3,7 @@ import { ThemeProvider } from '@/lib/theme'
 import { Toaster } from '@/components/ui/Toaster'
 import { AuthProvider } from '@/lib/auth-store'
 import { ConnectorsProvider } from '@/lib/connectors-store'
+import { ConnectorDraftsProvider } from '@/lib/connector-drafts-store'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
@@ -29,6 +30,7 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <ConnectorsProvider>
+        <ConnectorDraftsProvider>
           <Toaster />
           <BrowserRouter>
             <Routes>
@@ -65,6 +67,7 @@ export default function App() {
               </Route>
             </Routes>
           </BrowserRouter>
+        </ConnectorDraftsProvider>
         </ConnectorsProvider>
       </AuthProvider>
     </ThemeProvider>

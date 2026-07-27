@@ -82,7 +82,7 @@ export function AppShell({
         </main>
 
         <footer className="border-t border-border/10 px-6 py-4 text-center text-[11px] text-faint">
-          Gridhook — self-hosted MCP gateway. Not affiliated with Anthropic.
+          Gridhook — self-hosted MCP gateway.
         </footer>
       </div>
     </div>

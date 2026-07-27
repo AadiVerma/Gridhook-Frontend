@@ -5,13 +5,13 @@ import { AppShell } from '@/components/layout/AppShell'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { dailyInvocations, monthlyCost, topTools, totalCallsToday } from '@/lib/mock-data'
-import { useConnectorsStore } from '@/lib/connectors-store'
+import { useConnectorDrafts } from '@/lib/connector-drafts-store'
 import { cn } from '@/lib/utils'
 
 const ranges = ['7d', '30d', '90d'] as const
 
 export default function Analytics() {
-  const { connectors } = useConnectorsStore()
+  const { connectors } = useConnectorDrafts()
   const [range, setRange] = useState<(typeof ranges)[number]>('7d')
   const totalCalls = dailyInvocations.reduce((s, d) => s + d.calls, 0)
   const totalErrors = dailyInvocations.reduce((s, d) => s + d.errors, 0)

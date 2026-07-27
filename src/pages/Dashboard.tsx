@@ -7,13 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/Button'
 import { StatusPill } from '@/components/ui/Badge'
 import { dailyInvocations, topTools, connectorStatus, totalTools, totalCallsToday, connectorLastSync } from '@/lib/mock-data'
-import { useConnectorsStore } from '@/lib/connectors-store'
+import { useConnectorDrafts } from '@/lib/connector-drafts-store'
 import { timeAgo } from '@/lib/utils'
 import { useState } from 'react'
 
 export default function Dashboard() {
   const [copied, setCopied] = useState(false)
-  const { connectors } = useConnectorsStore()
+  const { connectors } = useConnectorDrafts()
   const activeConnectors = connectors.filter((c) => connectorStatus(c) === 'active').length
   const toolTotal = connectors.reduce((s, c) => s + totalTools(c), 0)
   const callsToday = connectors.reduce((s, c) => s + totalCallsToday(c), 0)

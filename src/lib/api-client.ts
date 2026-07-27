@@ -41,18 +41,20 @@ export function onUnauthorized(handler: () => void) {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
+  /** Send as-is instead of JSON.stringify-ing — for endpoints that read the raw request body (e.g. spec import). */
+  rawBody?: string
   signal?: AbortSignal
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options
+  const { method = 'GET', body, rawBody, signal } = options
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
 
   const res = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   })
 
@@ -80,4 +82,6 @@ export const api = {
   put: <T,>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...options, method: 'PUT', body }),
   delete: <T,>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>) => request<T>(path, { ...options, method: 'DELETE' }),
+  postRaw: <T,>(path: string, rawBody: string, options?: Omit<RequestOptions, 'method' | 'body' | 'rawBody'>) =>
+    request<T>(path, { ...options, method: 'POST', rawBody }),
 }

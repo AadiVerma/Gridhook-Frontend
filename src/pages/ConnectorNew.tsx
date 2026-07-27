@@ -1,21 +1,15 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Globe, Database, Braces, FileCode2, Check, Plus, Trash2 } from 'lucide-react'
+import { Check, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea, Field } from '@/components/ui/Input'
-import { ConnectorType, AuthType, Connector, Api, AuthConfig } from '@/lib/mock-data'
-import { useConnectorsStore } from '@/lib/connectors-store'
+import { BackendEngineType, BackendAuthType } from '@/lib/connectors-store'
+import { connectorApi, CreateConnectorInput, CredentialsInput, ENGINE_TYPE_OPTIONS, AUTH_TYPE_OPTIONS } from '@/lib/connector-api'
+import { ApiError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-
-const kinds: { id: ConnectorType; label: string; icon: typeof Globe; desc: string }[] = [
-  { id: 'REST', label: 'REST API', icon: Globe, desc: 'OpenAPI / Swagger or manual endpoints' },
-  { id: 'GraphQL', label: 'GraphQL', icon: Braces, desc: 'Schema introspection over HTTP' },
-  { id: 'Database', label: 'Database', icon: Database, desc: 'Postgres, MySQL, Snowflake, Mongo' },
-  { id: 'SOAP', label: 'SOAP / XML', icon: FileCode2, desc: 'WSDL-described legacy services' },
-]
 
 let draftKeySeq = 0
 function draftKey() {
@@ -26,15 +20,17 @@ function draftKey() {
 interface DraftApi {
   key: string
   name: string
-  type: ConnectorType
+  engineType: BackendEngineType
   baseUrl: string
-  authType: AuthType
+  authType: BackendAuthType
+  bearerToken: string
   apiKeyHeader: string
-  apiKeySecret: string
+  apiKeyValue: string
   basicUsername: string
   basicPassword: string
+  oauthTokenUrl: string
   oauthClientId: string
-  oauthScopes: string
+  oauthClientSecret: string
 }
 
 interface DraftModule {
@@ -48,15 +44,17 @@ function newApi(): DraftApi {
   return {
     key: draftKey(),
     name: '',
-    type: 'REST',
+    engineType: 'REST',
     baseUrl: '',
-    authType: 'OAuth2',
+    authType: 'oauth2',
+    bearerToken: '',
     apiKeyHeader: '',
-    apiKeySecret: '',
+    apiKeyValue: '',
     basicUsername: '',
     basicPassword: '',
+    oauthTokenUrl: '',
     oauthClientId: '',
-    oauthScopes: '',
+    oauthClientSecret: '',
   }
 }
 
@@ -64,30 +62,23 @@ function newModule(name: string): DraftModule {
   return { key: draftKey(), name, description: '', apis: [newApi()] }
 }
 
-function buildAuthConfig(api: DraftApi): AuthConfig {
-  if (api.authType === 'OAuth2') {
-    const scopes = api.oauthScopes.split(',').map((s) => s.trim()).filter(Boolean)
-    return { clientId: api.oauthClientId, ...(scopes.length ? { scopes } : {}) }
-  }
-  if (api.authType === 'API Key') return { header: api.apiKeyHeader }
-  if (api.authType === 'Basic') return { username: api.basicUsername }
+function buildCredentials(api: DraftApi): CredentialsInput | undefined {
+  if (api.authType === 'bearer' && api.bearerToken) return { authType: 'bearer', bearerToken: api.bearerToken }
+  if (api.authType === 'api_key' && api.apiKeyValue) return { authType: 'api_key', apiKeyHeader: api.apiKeyHeader, apiKeyValue: api.apiKeyValue }
+  if (api.authType === 'basic' && api.basicPassword)
+    return { authType: 'basic', basicUsername: api.basicUsername, basicPassword: api.basicPassword }
+  if (api.authType === 'oauth2' && api.oauthClientSecret)
+    return { authType: 'oauth2', tokenUrl: api.oauthTokenUrl, clientId: api.oauthClientId, clientSecret: api.oauthClientSecret }
   return undefined
-}
-
-function hasSecret(api: DraftApi): boolean {
-  if (api.authType === 'API Key') return !!api.apiKeySecret
-  if (api.authType === 'Basic') return !!api.basicPassword
-  if (api.authType === 'OAuth2') return !!api.oauthClientId
-  return false
 }
 
 export default function ConnectorNew() {
   const navigate = useNavigate()
-  const { addConnector } = useConnectorsStore()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [modules, setModules] = useState<DraftModule[]>([newModule('General')])
   const [step, setStep] = useState<'identity' | 'structure'>('identity')
+  const [submitting, setSubmitting] = useState(false)
 
   function updateModule(key: string, patch: Partial<DraftModule>) {
     setModules((prev) => prev.map((m) => (m.key === key ? { ...m, ...patch } : m)))
@@ -119,44 +110,32 @@ export default function ConnectorNew() {
 
   const totalApis = modules.reduce((s, m) => s + m.apis.length, 0)
 
-  function createConnector() {
-    const connectorId = `con_new_${Date.now()}`
-    const connector: Connector = {
-      id: connectorId,
+  async function createConnector() {
+    setSubmitting(true)
+    const payload: CreateConnectorInput = {
       name,
       glyph: name.slice(0, 2).toUpperCase() || 'CN',
-      tint: 'signal',
       description,
-      modules: modules.map((m, mi) => {
-        const moduleId = `${connectorId}_mod_${mi}`
-        return {
-          id: moduleId,
-          name: m.name || `Module ${mi + 1}`,
-          description: m.description,
-          apis: m.apis.map((a, ai): Api => {
-            const apiId = `${moduleId}_api_${ai}`
-            return {
-              id: apiId,
-              moduleId,
-              name: a.name || `API ${ai + 1}`,
-              description: '',
-              type: a.type,
-              baseUrl: a.baseUrl,
-              authType: a.authType,
-              authConfig: buildAuthConfig(a),
-              hasCredentials: hasSecret(a),
-              toolCount: 0,
-              status: 'active',
-              lastSync: new Date().toISOString(),
-              callsToday: 0,
-            }
-          }),
-        }
-      }),
+      modules: modules.map((m, mi) => ({
+        name: m.name || `Module ${mi + 1}`,
+        description: m.description,
+        apis: m.apis.map((a, ai) => ({
+          name: a.name || `API ${ai + 1}`,
+          engineType: a.engineType,
+          baseUrl: a.baseUrl,
+          authType: a.authType,
+          credentials: buildCredentials(a),
+        })),
+      })),
     }
-    addConnector(connector)
-    toast.success(`"${name}" created`)
-    navigate(`/connectors/${connectorId}`)
+    try {
+      const result = await connectorApi.create(payload)
+      toast.success(`"${name}" created`)
+      navigate(`/connectors/${result.connector.id}`)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Could not create this connector. Please try again.')
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -234,76 +213,93 @@ export default function ConnectorNew() {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {kinds.map((k) => (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {ENGINE_TYPE_OPTIONS.map((k) => (
                         <button
-                          key={k.id}
-                          onClick={() => updateApi(module.key, api.key, { type: k.id })}
+                          key={k.value}
+                          onClick={() => updateApi(module.key, api.key, { engineType: k.value })}
                           className={cn(
                             'flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors',
-                            api.type === k.id
+                            api.engineType === k.value
                               ? 'border-signal/50 bg-signal/5 shadow-[0_0_0_1px_rgb(var(--signal)/0.3)]'
                               : 'border-border-strong/15 hover:border-border-strong/30',
                           )}
                         >
-                          <span
-                            className={cn(
-                              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-                              api.type === k.id ? 'bg-signal text-white' : 'bg-canvas/60 text-muted border border-border/10',
-                            )}
-                          >
-                            <k.icon size={13} />
-                          </span>
                           <span>
                             <span className="block text-xs font-medium text-ink">{k.label}</span>
                             <span className="block text-[11px] text-faint">{k.desc}</span>
                           </span>
-                          {api.type === k.id && <Check size={13} className="ml-auto shrink-0 text-signal" />}
+                          {api.engineType === k.value && <Check size={13} className="ml-auto shrink-0 text-signal" />}
                         </button>
                       ))}
                     </div>
 
-                    <Field label={api.type === 'Database' ? 'Connection string host' : 'Base URL'} hint="Requests are routed through this host.">
+                    <Field label="Base URL" hint="Requests are routed through this host.">
                       <Input
-                        placeholder={api.type === 'Database' ? 'db.internal:5432/prod' : 'https://api.example.com/v1'}
+                        placeholder="https://api.example.com/v1"
                         value={api.baseUrl}
                         onChange={(e) => updateApi(module.key, api.key, { baseUrl: e.target.value })}
                       />
                     </Field>
 
                     <Field label="Authentication">
-                      <Select value={api.authType} onChange={(e) => updateApi(module.key, api.key, { authType: e.target.value as AuthType })}>
-                        <option>OAuth2</option>
-                        <option>Bearer</option>
-                        <option>API Key</option>
-                        <option>Basic</option>
-                        <option>None</option>
+                      <Select value={api.authType} onChange={(e) => updateApi(module.key, api.key, { authType: e.target.value as BackendAuthType })}>
+                        {AUTH_TYPE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
                       </Select>
                     </Field>
 
-                    {api.authType === 'OAuth2' && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="Client ID">
-                          <Input placeholder="client_9f2a" value={api.oauthClientId} onChange={(e) => updateApi(module.key, api.key, { oauthClientId: e.target.value })} />
+                    {api.authType === 'oauth2' && (
+                      <div className="space-y-3">
+                        <Field label="Token URL">
+                          <Input
+                            placeholder="https://api.example.com/oauth/token"
+                            value={api.oauthTokenUrl}
+                            onChange={(e) => updateApi(module.key, api.key, { oauthTokenUrl: e.target.value })}
+                          />
                         </Field>
-                        <Field label="Scopes" hint="Comma-separated">
-                          <Input placeholder="read, write" value={api.oauthScopes} onChange={(e) => updateApi(module.key, api.key, { oauthScopes: e.target.value })} />
-                        </Field>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Client ID">
+                            <Input placeholder="client_9f2a" value={api.oauthClientId} onChange={(e) => updateApi(module.key, api.key, { oauthClientId: e.target.value })} />
+                          </Field>
+                          <Field label="Client secret">
+                            <Input
+                              type="password"
+                              placeholder="••••••••••••"
+                              value={api.oauthClientSecret}
+                              onChange={(e) => updateApi(module.key, api.key, { oauthClientSecret: e.target.value })}
+                            />
+                          </Field>
+                        </div>
                       </div>
                     )}
 
-                    {api.authType === 'API Key' && (
+                    {api.authType === 'bearer' && (
+                      <Field label="Bearer token">
+                        <Input
+                          type="password"
+                          placeholder="••••••••••••"
+                          value={api.bearerToken}
+                          onChange={(e) => updateApi(module.key, api.key, { bearerToken: e.target.value })}
+                        />
+                      </Field>
+                    )}
+
+                    {api.authType === 'api_key' && (
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="Header name">
                           <Input placeholder="X-API-Key" value={api.apiKeyHeader} onChange={(e) => updateApi(module.key, api.key, { apiKeyHeader: e.target.value })} />
                         </Field>
                         <Field label="API key">
-                          <Input type="password" placeholder="••••••••••••" value={api.apiKeySecret} onChange={(e) => updateApi(module.key, api.key, { apiKeySecret: e.target.value })} />
+                          <Input type="password" placeholder="••••••••••••" value={api.apiKeyValue} onChange={(e) => updateApi(module.key, api.key, { apiKeyValue: e.target.value })} />
                         </Field>
                       </div>
                     )}
 
-                    {api.authType === 'Basic' && (
+                    {api.authType === 'basic' && (
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="Username">
                           <Input placeholder="service-account" value={api.basicUsername} onChange={(e) => updateApi(module.key, api.key, { basicUsername: e.target.value })} />
@@ -335,8 +331,8 @@ export default function ConnectorNew() {
               <span className="text-xs text-faint">
                 {modules.length} module{modules.length === 1 ? '' : 's'} · {totalApis} api{totalApis === 1 ? '' : 's'}
               </span>
-              <Button variant="primary" onClick={createConnector} disabled={!name}>
-                Create connector
+              <Button variant="primary" onClick={createConnector} disabled={!name || submitting}>
+                {submitting ? 'Creating…' : 'Create connector'}
               </Button>
             </div>
           </div>

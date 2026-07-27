@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Plus, Wrench, Play, Trash2, Settings2, Pencil, Check, X, ChevronRight, Upload, FileJson } from 'lucide-react'
+import { Plus, Wrench, Play, Trash2, Pencil, Check, X, ChevronRight, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
@@ -9,56 +9,34 @@ import { Badge, StatusPill, Tone } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select, Field, Textarea } from '@/components/ui/Input'
 import { Switch } from '@/components/ui/Switch'
+import { BackendEngineType, BackendAuthType } from '@/lib/connectors-store'
 import {
-  ConnectorType,
-  Api,
-  ApiStatus,
-  AuthType,
-  AuthConfig,
-  ConnectorTool,
-  ToolParam,
-  ImportedOperation,
-  allApis,
-  toolsForApi,
-  connectorStatus,
-  totalTools,
-  paramsForTool,
-  sampleRequestForTool,
-  sampleResponseForTool,
-  parseToolsSpec,
-} from '@/lib/mock-data'
-import { useConnectorsStore } from '@/lib/connectors-store'
+  connectorApi,
+  ConnectorDetail as ConnectorDetailModel,
+  ModuleWithApis,
+  ConnectorApi,
+  Tool,
+  CredentialsInput,
+  ENGINE_TYPE_OPTIONS,
+  AUTH_TYPE_OPTIONS,
+} from '@/lib/connector-api'
+import { ApiError } from '@/lib/api-client'
 
-const typeTone: Record<ConnectorType, Tone> = {
+const engineTone: Record<BackendEngineType, Tone> = {
   REST: 'signal',
-  GraphQL: 'violet',
+  GRAPHQL: 'violet',
   SOAP: 'warn',
-  Database: 'info',
 }
 
-function statusTone(status: ApiStatus) {
-  return status === 'active' ? 'ok' : status === 'error' ? 'bad' : 'neutral'
-}
+const engineLabel = Object.fromEntries(ENGINE_TYPE_OPTIONS.map((o) => [o.value, o.label.replace(' API', '').replace(' / XML', '')])) as Record<
+  BackendEngineType,
+  string
+>
 
-const operationLabel: Record<ConnectorType, string> = {
-  REST: 'Operation',
-  SOAP: 'SOAP action / operation name',
-  GraphQL: 'GraphQL operation name',
-  Database: 'Query / function name',
-}
+const authLabel = Object.fromEntries(AUTH_TYPE_OPTIONS.map((o) => [o.value, o.label])) as Record<BackendAuthType, string>
 
-const operationPlaceholder: Record<ConnectorType, string> = {
-  REST: '',
-  SOAP: 'CreatePurchaseOrder',
-  GraphQL: 'getCustomerBalance',
-  Database: 'get_customer_balance',
-}
-
-const specHint: Record<ConnectorType, string> = {
-  REST: 'Paste an OpenAPI/Swagger JSON spec.',
-  GraphQL: 'Paste a GraphQL schema (SDL) — Query and Mutation type fields become tools.',
-  SOAP: 'Paste a JSON array of operations, or WSDL XML (operation names only).',
-  Database: 'Paste a JSON array of operations: [{ "operation": "...", "params": [...] }]',
+function errorMessage(err: unknown, fallback: string) {
+  return err instanceof ApiError ? err.message : fallback
 }
 
 function isValidJsonOrEmpty(text: string) {
@@ -71,412 +49,490 @@ function isValidJsonOrEmpty(text: string) {
   }
 }
 
-function ParamsEditor({ params, onChange }: { params: ToolParam[]; onChange: (next: ToolParam[]) => void }) {
-  function update(i: number, patch: Partial<ToolParam>) {
-    onChange(params.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))
-  }
-  function remove(i: number) {
-    onChange(params.filter((_, idx) => idx !== i))
-  }
-  function add() {
-    onChange([...params, { name: '', in: 'query', type: 'string', required: false, description: '' }])
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-muted">Parameters</p>
-        <Button variant="secondary" size="sm" onClick={add}>
-          <Plus size={12} /> Add parameter
-        </Button>
-      </div>
-      {params.length === 0 && <p className="mt-2 text-xs text-faint">No parameters defined.</p>}
-      <div className="mt-2 space-y-2">
-        {params.map((p, i) => (
-          <div key={i} className="grid grid-cols-12 items-center gap-2">
-            <Input className="col-span-2" placeholder="name" value={p.name} onChange={(e) => update(i, { name: e.target.value })} />
-            <Select className="col-span-2" value={p.in} onChange={(e) => update(i, { in: e.target.value as ToolParam['in'] })}>
-              <option value="path">path</option>
-              <option value="query">query</option>
-              <option value="body">body</option>
-              <option value="header">header</option>
-            </Select>
-            <Input className="col-span-2" placeholder="type" value={p.type} onChange={(e) => update(i, { type: e.target.value })} />
-            <label className="col-span-1 flex items-center justify-center gap-1 text-[11px] text-muted">
-              <input type="checkbox" checked={p.required} onChange={(e) => update(i, { required: e.target.checked })} /> req
-            </label>
-            <Input
-              className="col-span-4"
-              placeholder="description"
-              value={p.description}
-              onChange={(e) => update(i, { description: e.target.value })}
-            />
-            <button
-              onClick={() => remove(i)}
-              className="col-span-1 flex items-center justify-center text-faint hover:text-bad"
-              title="Remove parameter"
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 interface TargetTool {
-  apiId: string
-  tool: ConnectorTool
+  apiId: number
+  tool: Tool
 }
 
 export default function ConnectorDetail() {
   const { id } = useParams()
-  const { connectors, setApiStatus, setConnectorApisStatus, updateApi, moveApi, addModule, addApi } = useConnectorsStore()
-  const connector = connectors.find((c) => c.id === id) ?? connectors[0]
-  const [toolsByApi, setToolsByApi] = useState<Record<string, ConnectorTool[]>>(() =>
-    Object.fromEntries(allApis(connector).map((a) => [a.id, toolsForApi(a)])),
-  )
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [targetApiId, setTargetApiId] = useState<string | null>(null)
-  const [toolName, setToolName] = useState('')
-  const [toolMethod, setToolMethod] = useState<ConnectorTool['method']>('GET')
-  const [toolPath, setToolPath] = useState('')
-  const [toolOperation, setToolOperation] = useState('')
-  const [toolOperationKind, setToolOperationKind] = useState<'query' | 'mutation'>('query')
-  const [toolParams, setToolParams] = useState<ToolParam[]>([])
-  const [toolSampleRequestText, setToolSampleRequestText] = useState('')
-  const [toolSampleResponseText, setToolSampleResponseText] = useState('')
-  const [runningId, setRunningId] = useState<string | null>(null)
-  const [runResult, setRunResult] = useState<{ apiId: string; tool: string; ok: boolean } | null>(null)
-  const [viewingTool, setViewingTool] = useState<TargetTool | null>(null)
-  const [viewName, setViewName] = useState('')
-  const [viewPath, setViewPath] = useState('')
-  const [viewOperation, setViewOperation] = useState('')
-  const [viewOperationKind, setViewOperationKind] = useState<'query' | 'mutation'>('query')
-  const [viewParams, setViewParams] = useState<ToolParam[]>([])
-  const [viewSampleRequestText, setViewSampleRequestText] = useState('')
-  const [viewSampleResponseText, setViewSampleResponseText] = useState('')
+  const connectorId = Number(id)
+
+  const [connector, setConnector] = useState<ConnectorDetailModel | null>(null)
+  const [modules, setModules] = useState<ModuleWithApis[]>([])
+  const [unassignedApis, setUnassignedApis] = useState<ConnectorApi[]>([])
+  const [toolsByApi, setToolsByApi] = useState<Record<number, Tool[]>>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [conn, moduleGroups, allApis] = await Promise.all([
+        connectorApi.get(connectorId),
+        connectorApi.listModules(connectorId),
+        connectorApi.listApis(connectorId),
+      ])
+      const assignedIds = new Set(moduleGroups.flatMap((g) => g.apis.map((a) => a.id)))
+      const unassigned = allApis.filter((a) => !assignedIds.has(a.id))
+      const toolLists = await Promise.all(allApis.map((a) => connectorApi.listTools(connectorId, a.id).catch(() => [] as Tool[])))
+      setConnector(conn)
+      setModules(moduleGroups)
+      setUnassignedApis(unassigned)
+      setToolsByApi(Object.fromEntries(allApis.map((a, i) => [a.id, toolLists[i]])))
+    } catch (err) {
+      setError(errorMessage(err, 'Unable to load this connector.'))
+    } finally {
+      setLoading(false)
+    }
+  }, [connectorId])
+
+  useEffect(() => {
+    if (Number.isFinite(connectorId)) fetchAll()
+  }, [connectorId, fetchAll])
+
+  const [runningId, setRunningId] = useState<number | null>(null)
+  const [runResult, setRunResult] = useState<{ apiId: number; tool: string; ok: boolean; detail?: string } | null>(null)
+  const [runningToolTarget, setRunningToolTarget] = useState<TargetTool | null>(null)
+  const [runInputText, setRunInputText] = useState('{}')
+
   const [pendingDeleteTool, setPendingDeleteTool] = useState<TargetTool | null>(null)
 
-  const [importToolsApiId, setImportToolsApiId] = useState<string | null>(null)
-  const [importToolsText, setImportToolsText] = useState('')
-  const [importToolsError, setImportToolsError] = useState('')
-  const [importToolsPreview, setImportToolsPreview] = useState<ImportedOperation[] | null>(null)
-  const [importToolsSelected, setImportToolsSelected] = useState<Set<number>>(new Set())
-  const importFileInputRef = useRef<HTMLInputElement>(null)
+  const [toolModalTarget, setToolModalTarget] = useState<{ apiId: number; tool: Tool | null } | null>(null)
+  const [toolName, setToolName] = useState('')
+  const [toolMethod, setToolMethod] = useState<Tool['method']>('GET')
+  const [toolPath, setToolPath] = useState('')
+  const [toolDescription, setToolDescription] = useState('')
+  const [toolParamsText, setToolParamsText] = useState('{}')
+  const [toolCacheTtl, setToolCacheTtl] = useState(0)
+  const [savingTool, setSavingTool] = useState(false)
 
-  const [editingApi, setEditingApi] = useState<Api | null>(null)
+  const [editingApi, setEditingApi] = useState<ConnectorApi | null>(null)
   const [editName, setEditName] = useState('')
-  const [editDescription, setEditDescription] = useState('')
-  const [editModuleId, setEditModuleId] = useState('')
-  const [editType, setEditType] = useState<ConnectorType>('REST')
+  const [editGroupId, setEditGroupId] = useState(0)
+  const [editEngineType, setEditEngineType] = useState<BackendEngineType>('REST')
   const [editBaseUrl, setEditBaseUrl] = useState('')
-  const [editAuthType, setEditAuthType] = useState<AuthType>('OAuth2')
+  const [editAuthType, setEditAuthType] = useState<BackendAuthType>('oauth2')
+  const [editBearerToken, setEditBearerToken] = useState('')
   const [editApiKeyHeader, setEditApiKeyHeader] = useState('')
-  const [editApiKeySecret, setEditApiKeySecret] = useState('')
+  const [editApiKeyValue, setEditApiKeyValue] = useState('')
   const [editBasicUsername, setEditBasicUsername] = useState('')
   const [editBasicPassword, setEditBasicPassword] = useState('')
+  const [editOauthTokenUrl, setEditOauthTokenUrl] = useState('')
   const [editOauthClientId, setEditOauthClientId] = useState('')
-  const [editOauthScopes, setEditOauthScopes] = useState('')
+  const [editOauthClientSecret, setEditOauthClientSecret] = useState('')
+  const [savingApi, setSavingApi] = useState(false)
 
   const [moduleModalOpen, setModuleModalOpen] = useState(false)
   const [newModuleName, setNewModuleName] = useState('')
   const [newModuleDescription, setNewModuleDescription] = useState('')
+  const [savingModule, setSavingModule] = useState(false)
 
-  const [newApiModuleId, setNewApiModuleId] = useState<string | null>(null)
+  const [newApiGroupId, setNewApiGroupId] = useState<number | null | 'unassigned'>(null)
   const [newApiName, setNewApiName] = useState('')
-  const [newApiDescription, setNewApiDescription] = useState('')
-  const [newApiType, setNewApiType] = useState<ConnectorType>('REST')
+  const [newApiEngineType, setNewApiEngineType] = useState<BackendEngineType>('REST')
   const [newApiBaseUrl, setNewApiBaseUrl] = useState('')
-  const [newApiAuthType, setNewApiAuthType] = useState<AuthType>('OAuth2')
+  const [newApiAuthType, setNewApiAuthType] = useState<BackendAuthType>('oauth2')
+  const [newApiBearerToken, setNewApiBearerToken] = useState('')
   const [newApiKeyHeader, setNewApiKeyHeader] = useState('')
-  const [newApiKeySecret, setNewApiKeySecret] = useState('')
+  const [newApiKeyValue, setNewApiKeyValue] = useState('')
   const [newApiBasicUsername, setNewApiBasicUsername] = useState('')
   const [newApiBasicPassword, setNewApiBasicPassword] = useState('')
+  const [newApiOauthTokenUrl, setNewApiOauthTokenUrl] = useState('')
   const [newApiOauthClientId, setNewApiOauthClientId] = useState('')
-  const [newApiOauthScopes, setNewApiOauthScopes] = useState('')
+  const [newApiOauthClientSecret, setNewApiOauthClientSecret] = useState('')
+  const [savingNewApi, setSavingNewApi] = useState(false)
 
-  useEffect(() => {
-    setToolsByApi(Object.fromEntries(allApis(connector).map((a) => [a.id, toolsForApi(a)])))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connector.id])
-
-  const apis = allApis(connector)
-  const status = connectorStatus(connector)
-  const targetApi = apis.find((a) => a.id === targetApiId) ?? null
-
-  function toggleConnectorActive() {
-    setConnectorApisStatus(connector.id, status === 'active' ? 'inactive' : 'active')
+  if (loading) {
+    return (
+      <AppShell title="Connector" backTo="/connectors">
+        <Card className="flex flex-col items-center gap-3 py-20 text-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-border-strong/30 border-t-signal" />
+          <p className="text-sm text-muted">Loading connector…</p>
+        </Card>
+      </AppShell>
+    )
   }
 
-  function toggleApiActive(api: Api) {
-    setApiStatus(connector.id, api.id, api.status === 'active' ? 'inactive' : 'active')
+  if (error || !connector) {
+    return (
+      <AppShell title="Connector" backTo="/connectors">
+        <Card className="flex flex-col items-center gap-2 py-14 text-center">
+          <p className="text-sm font-medium text-ink">Couldn't load this connector</p>
+          <p className="text-xs text-muted">{error}</p>
+          <Button variant="secondary" size="sm" className="mt-2" onClick={fetchAll}>
+            <RefreshCw size={13} /> Retry
+          </Button>
+        </Card>
+      </AppShell>
+    )
   }
 
-  function openEditApi(api: Api) {
+  const totalApis = modules.reduce((s, m) => s + m.apis.length, 0) + unassignedApis.length
+
+  async function toggleConnectorActive() {
+    if (!connector) return
+    try {
+      const updated = await connectorApi.toggle(connector.id, connector.status !== 'active')
+      setConnector(updated)
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't update connector status"))
+    }
+  }
+
+  async function toggleApiActive(api: ConnectorApi) {
+    try {
+      const updated = await connectorApi.patchApi(connectorId, api.id, { isActive: !api.isActive })
+      applyApiUpdate(updated)
+    } catch (err) {
+      toast.error(errorMessage(err, `Couldn't update "${api.name}"`))
+    }
+  }
+
+  function applyApiUpdate(updated: ConnectorApi) {
+    setModules((prev) => prev.map((g) => ({ ...g, apis: g.apis.map((a) => (a.id === updated.id ? updated : a)) })))
+    setUnassignedApis((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
+  }
+
+  function openEditApi(api: ConnectorApi) {
     setEditingApi(api)
     setEditName(api.name)
-    setEditDescription(api.description)
-    setEditModuleId(api.moduleId)
-    setEditType(api.type)
+    setEditGroupId(api.groupId ?? 0)
+    setEditEngineType(api.engineType)
     setEditBaseUrl(api.baseUrl)
     setEditAuthType(api.authType)
-    setEditApiKeyHeader((api.authConfig && 'header' in api.authConfig && api.authConfig.header) || '')
-    setEditApiKeySecret('')
-    setEditBasicUsername((api.authConfig && 'username' in api.authConfig && api.authConfig.username) || '')
+    setEditBearerToken('')
+    setEditApiKeyHeader('')
+    setEditApiKeyValue('')
+    setEditBasicUsername('')
     setEditBasicPassword('')
-    setEditOauthClientId((api.authConfig && 'clientId' in api.authConfig && api.authConfig.clientId) || '')
-    setEditOauthScopes((api.authConfig && 'scopes' in api.authConfig && api.authConfig.scopes?.join(', ')) || '')
+    setEditOauthTokenUrl('')
+    setEditOauthClientId('')
+    setEditOauthClientSecret('')
   }
 
-  function buildEditAuthConfig(): AuthConfig {
-    if (editAuthType === 'OAuth2') {
-      const scopes = editOauthScopes.split(',').map((s) => s.trim()).filter(Boolean)
-      return { clientId: editOauthClientId, ...(scopes.length ? { scopes } : {}) }
-    }
-    if (editAuthType === 'API Key') return { header: editApiKeyHeader }
-    if (editAuthType === 'Basic') return { username: editBasicUsername }
+  function buildEditCredentials(): CredentialsInput | undefined {
+    if (editAuthType === 'bearer' && editBearerToken) return { authType: 'bearer', bearerToken: editBearerToken }
+    if (editAuthType === 'api_key' && editApiKeyValue) return { authType: 'api_key', apiKeyHeader: editApiKeyHeader, apiKeyValue: editApiKeyValue }
+    if (editAuthType === 'basic' && editBasicPassword)
+      return { authType: 'basic', basicUsername: editBasicUsername, basicPassword: editBasicPassword }
+    if (editAuthType === 'oauth2' && editOauthClientSecret)
+      return { authType: 'oauth2', tokenUrl: editOauthTokenUrl, clientId: editOauthClientId, clientSecret: editOauthClientSecret }
     return undefined
   }
 
-  function saveApiEdit() {
+  async function saveApiEdit() {
     if (!editingApi) return
-    const secretEntered = editAuthType === 'API Key' ? !!editApiKeySecret : editAuthType === 'Basic' ? !!editBasicPassword : false
-    updateApi(connector.id, editingApi.id, {
-      name: editName,
-      description: editDescription,
-      type: editType,
-      baseUrl: editBaseUrl,
-      authType: editAuthType,
-      authConfig: buildEditAuthConfig(),
-      hasCredentials: secretEntered ? true : editingApi.hasCredentials,
-    })
-    if (editModuleId !== editingApi.moduleId) moveApi(connector.id, editingApi.id, editModuleId)
-    setEditingApi(null)
-    toast.success('API settings saved')
+    setSavingApi(true)
+    try {
+      const updated = await connectorApi.patchApi(connectorId, editingApi.id, {
+        name: editName,
+        baseUrl: editBaseUrl,
+        authType: editAuthType,
+        groupId: editGroupId,
+      })
+      const credentials = buildEditCredentials()
+      if (credentials) await connectorApi.putCredentials(connectorId, editingApi.id, credentials)
+      applyApiUpdate(updated)
+      if (editGroupId !== (editingApi.groupId ?? 0)) await fetchAll()
+      setEditingApi(null)
+      toast.success('API settings saved')
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't save API settings"))
+    } finally {
+      setSavingApi(false)
+    }
   }
 
-  function saveNewModule() {
-    addModule(connector.id, {
-      id: `${connector.id}_mod_${Date.now()}`,
-      name: newModuleName,
-      description: newModuleDescription,
-      apis: [],
-    })
-    setNewModuleName('')
-    setNewModuleDescription('')
-    setModuleModalOpen(false)
-    toast.success(`Module "${newModuleName}" added`)
+  async function saveNewModule() {
+    setSavingModule(true)
+    try {
+      await connectorApi.createModule(connectorId, { name: newModuleName, description: newModuleDescription, apis: [] })
+      setNewModuleName('')
+      setNewModuleDescription('')
+      setModuleModalOpen(false)
+      toast.success(`Module "${newModuleName}" added`)
+      await fetchAll()
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't add module"))
+    } finally {
+      setSavingModule(false)
+    }
   }
 
-  function openNewApi(moduleId: string) {
-    setNewApiModuleId(moduleId)
+  function openNewApi(groupId: number | 'unassigned') {
+    setNewApiGroupId(groupId)
     setNewApiName('')
-    setNewApiDescription('')
-    setNewApiType('REST')
+    setNewApiEngineType('REST')
     setNewApiBaseUrl('')
-    setNewApiAuthType('OAuth2')
+    setNewApiAuthType('oauth2')
+    setNewApiBearerToken('')
     setNewApiKeyHeader('')
-    setNewApiKeySecret('')
+    setNewApiKeyValue('')
     setNewApiBasicUsername('')
     setNewApiBasicPassword('')
+    setNewApiOauthTokenUrl('')
     setNewApiOauthClientId('')
-    setNewApiOauthScopes('')
+    setNewApiOauthClientSecret('')
   }
 
-  function buildNewApiAuthConfig(): AuthConfig {
-    if (newApiAuthType === 'OAuth2') {
-      const scopes = newApiOauthScopes.split(',').map((s) => s.trim()).filter(Boolean)
-      return { clientId: newApiOauthClientId, ...(scopes.length ? { scopes } : {}) }
-    }
-    if (newApiAuthType === 'API Key') return { header: newApiKeyHeader }
-    if (newApiAuthType === 'Basic') return { username: newApiBasicUsername }
+  function buildNewApiCredentials(): CredentialsInput | undefined {
+    if (newApiAuthType === 'bearer' && newApiBearerToken) return { authType: 'bearer', bearerToken: newApiBearerToken }
+    if (newApiAuthType === 'api_key' && newApiKeyValue) return { authType: 'api_key', apiKeyHeader: newApiKeyHeader, apiKeyValue: newApiKeyValue }
+    if (newApiAuthType === 'basic' && newApiBasicPassword)
+      return { authType: 'basic', basicUsername: newApiBasicUsername, basicPassword: newApiBasicPassword }
+    if (newApiAuthType === 'oauth2' && newApiOauthClientSecret)
+      return { authType: 'oauth2', tokenUrl: newApiOauthTokenUrl, clientId: newApiOauthClientId, clientSecret: newApiOauthClientSecret }
     return undefined
   }
 
-  function saveNewApi() {
-    if (!newApiModuleId) return
-    const secretEntered =
-      newApiAuthType === 'API Key' ? !!newApiKeySecret : newApiAuthType === 'Basic' ? !!newApiBasicPassword : newApiAuthType === 'OAuth2' ? !!newApiOauthClientId : false
-    addApi(connector.id, newApiModuleId, {
-      id: `${newApiModuleId}_api_${Date.now()}`,
-      moduleId: newApiModuleId,
-      name: newApiName,
-      description: newApiDescription,
-      type: newApiType,
-      baseUrl: newApiBaseUrl,
-      authType: newApiAuthType,
-      authConfig: buildNewApiAuthConfig(),
-      hasCredentials: secretEntered,
-      toolCount: 0,
-      status: 'active',
-      lastSync: new Date().toISOString(),
-      callsToday: 0,
-    })
-    setNewApiModuleId(null)
-    toast.success(`API "${newApiName}" added`)
-  }
-
-  function runTool(api: Api, t: ConnectorTool) {
-    setRunningId(t.id)
-    setTimeout(() => {
-      setRunningId(null)
-      setRunResult({ apiId: api.id, tool: t.name, ok: api.status === 'active' })
-      setTimeout(() => setRunResult(null), 2200)
-    }, 700)
-  }
-
-  function openNewTool(apiId: string) {
-    setTargetApiId(apiId)
-    setToolName('')
-    setToolMethod('GET')
-    setToolPath('')
-    setToolOperation('')
-    setToolOperationKind('query')
-    setToolParams([])
-    setToolSampleRequestText('')
-    setToolSampleResponseText('')
-    setEditorOpen(true)
-  }
-
-  function openToolDetails(apiId: string, t: ConnectorTool) {
-    setViewingTool({ apiId, tool: t })
-    setViewName(t.name)
-    setViewPath(t.path)
-    setViewOperation(t.operation ?? t.name)
-    setViewOperationKind(t.operationKind ?? 'query')
-    setViewParams(paramsForTool(t))
-    setViewSampleRequestText(JSON.stringify(sampleRequestForTool(t), null, 2))
-    setViewSampleResponseText(JSON.stringify(sampleResponseForTool(t), null, 2))
-  }
-
-  function saveToolDetails() {
-    if (!viewingTool) return
-    const { apiId, tool } = viewingTool
-    const api = apis.find((a) => a.id === apiId)
-    const isRest = api?.type === 'REST'
-    const patch: Partial<ConnectorTool> = {
-      name: viewName,
-      params: viewParams.filter((p) => p.name.trim()),
-      sampleRequest: viewSampleRequestText.trim() ? JSON.parse(viewSampleRequestText) : undefined,
-      sampleResponse: viewSampleResponseText.trim() ? JSON.parse(viewSampleResponseText) : undefined,
-      ...(isRest ? { path: viewPath } : { operation: viewOperation, operationKind: api?.type === 'GraphQL' ? viewOperationKind : undefined }),
+  async function saveNewApi() {
+    if (newApiGroupId === null) return
+    setSavingNewApi(true)
+    try {
+      await connectorApi.createApi(connectorId, {
+        name: newApiName,
+        engineType: newApiEngineType,
+        baseUrl: newApiBaseUrl,
+        authType: newApiAuthType,
+        credentials: buildNewApiCredentials(),
+        ...(newApiGroupId !== 'unassigned' ? { groupId: newApiGroupId } : {}),
+      })
+      setNewApiGroupId(null)
+      toast.success(`API "${newApiName}" added`)
+      await fetchAll()
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't add API"))
+    } finally {
+      setSavingNewApi(false)
     }
-    setToolsByApi((prev) => ({
-      ...prev,
-      [apiId]: prev[apiId].map((t) => (t.id === tool.id ? { ...t, ...patch } : t)),
-    }))
-    setViewingTool(null)
-    toast.success('Tool updated')
   }
 
-  function confirmDeleteTool() {
+  function findApi(apiId: number): ConnectorApi | undefined {
+    return modules.flatMap((g) => g.apis).concat(unassignedApis).find((a) => a.id === apiId)
+  }
+
+  function runTool(apiId: number, tool: Tool) {
+    setRunningToolTarget({ apiId, tool })
+    setRunInputText('{}')
+  }
+
+  async function confirmRunTool() {
+    if (!runningToolTarget) return
+    const { apiId, tool } = runningToolTarget
+    let input: unknown
+    try {
+      input = runInputText.trim() ? JSON.parse(runInputText) : {}
+    } catch {
+      toast.error('Input must be valid JSON')
+      return
+    }
+    setRunningId(tool.id)
+    setRunningToolTarget(null)
+    try {
+      await connectorApi.runTool(connectorId, tool.id, input)
+      setRunResult({ apiId, tool: tool.name, ok: true })
+    } catch (err) {
+      setRunResult({ apiId, tool: tool.name, ok: false, detail: errorMessage(err, 'Run failed') })
+    } finally {
+      setRunningId(null)
+      setTimeout(() => setRunResult(null), 3000)
+    }
+  }
+
+  function openNewTool(apiId: number) {
+    setToolModalTarget({ apiId, tool: null })
+    setToolName('')
+    setToolMethod(findApi(apiId)?.engineType === 'REST' ? 'GET' : 'POST')
+    setToolPath('')
+    setToolDescription('')
+    setToolParamsText('{}')
+    setToolCacheTtl(0)
+  }
+
+  function openEditTool(apiId: number, tool: Tool) {
+    setToolModalTarget({ apiId, tool })
+    setToolName(tool.name)
+    setToolMethod(tool.method)
+    setToolPath(tool.path)
+    setToolDescription(tool.description ?? '')
+    setToolParamsText(JSON.stringify(tool.parameters ?? {}, null, 2))
+    setToolCacheTtl(tool.cacheTtlSeconds)
+  }
+
+  async function saveToolModal() {
+    if (!toolModalTarget) return
+    const { apiId, tool } = toolModalTarget
+    let parameters: unknown
+    try {
+      parameters = toolParamsText.trim() ? JSON.parse(toolParamsText) : {}
+    } catch {
+      toast.error('Parameters must be valid JSON')
+      return
+    }
+    setSavingTool(true)
+    try {
+      if (tool) {
+        const updated = await connectorApi.patchTool(connectorId, tool.id, {
+          name: toolName,
+          method: toolMethod,
+          path: toolPath,
+          description: toolDescription,
+          parameters,
+          cacheTtlSeconds: toolCacheTtl,
+        })
+        setToolsByApi((prev) => ({ ...prev, [apiId]: (prev[apiId] ?? []).map((t) => (t.id === tool.id ? updated : t)) }))
+        toast.success('Tool updated')
+      } else {
+        const created = await connectorApi.createTool(connectorId, apiId, {
+          name: toolName,
+          method: toolMethod,
+          path: toolPath,
+          description: toolDescription,
+          parameters,
+        })
+        setToolsByApi((prev) => ({ ...prev, [apiId]: [...(prev[apiId] ?? []), created] }))
+        setConnector((prev) => (prev ? { ...prev, toolCount: prev.toolCount + 1 } : prev))
+        toast.success(`Tool "${toolName}" created`)
+      }
+      setToolModalTarget(null)
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't save this tool"))
+    } finally {
+      setSavingTool(false)
+    }
+  }
+
+  async function confirmDeleteTool() {
     if (!pendingDeleteTool) return
     const { apiId, tool } = pendingDeleteTool
-    setToolsByApi((prev) => ({ ...prev, [apiId]: prev[apiId].filter((t) => t.id !== tool.id) }))
-    setPendingDeleteTool(null)
-    toast.success(`Tool "${tool.name}" deleted`)
-  }
-
-  function saveTool() {
-    if (!targetApiId) return
-    const isRest = targetApi?.type === 'REST'
-    setToolsByApi((prev) => ({
-      ...prev,
-      [targetApiId]: [
-        ...(prev[targetApiId] ?? []),
-        {
-          id: `${targetApiId}_tool_custom_${(prev[targetApiId] ?? []).length}`,
-          apiId: targetApiId,
-          name: toolName,
-          method: isRest ? toolMethod : 'POST',
-          path: isRest ? toolPath || '/' : '',
-          cached: false,
-          params: toolParams.filter((p) => p.name.trim()),
-          sampleRequest: toolSampleRequestText.trim() ? JSON.parse(toolSampleRequestText) : undefined,
-          sampleResponse: toolSampleResponseText.trim() ? JSON.parse(toolSampleResponseText) : undefined,
-          ...(isRest ? {} : { operation: toolOperation, operationKind: targetApi?.type === 'GraphQL' ? toolOperationKind : undefined }),
-        },
-      ],
-    }))
-    setEditorOpen(false)
-    toast.success(`Tool "${toolName}" created`)
-  }
-
-  function openImportTools(apiId: string) {
-    setImportToolsApiId(apiId)
-    setImportToolsText('')
-    setImportToolsError('')
-    setImportToolsPreview(null)
-    setImportToolsSelected(new Set())
-  }
-
-  function handleImportFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    file.text().then((text) => setImportToolsText(text))
-  }
-
-  function parseImportPreview() {
-    const importApi = apis.find((a) => a.id === importToolsApiId)
-    if (!importApi) return
-    const { operations, error } = parseToolsSpec(importToolsText, importApi.type)
-    setImportToolsError(error ?? '')
-    setImportToolsPreview(operations)
-    setImportToolsSelected(new Set(operations.map((_, i) => i)))
-  }
-
-  function toggleImportSelected(i: number) {
-    setImportToolsSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
-      return next
-    })
-  }
-
-  function operationToTool(op: ImportedOperation, apiId: string, index: number): ConnectorTool {
-    return {
-      id: `${apiId}_tool_import_${Date.now()}_${index}`,
-      apiId,
-      name: op.name,
-      method: op.method ?? 'POST',
-      path: op.path ?? '',
-      cached: false,
-      operation: op.operation,
-      operationKind: op.operationKind,
-      params: op.params,
-      sampleRequest: op.sampleRequest,
-      sampleResponse: op.sampleResponse,
+    try {
+      await connectorApi.deleteTool(connectorId, tool.id)
+      setToolsByApi((prev) => ({ ...prev, [apiId]: (prev[apiId] ?? []).filter((t) => t.id !== tool.id) }))
+      setConnector((prev) => (prev ? { ...prev, toolCount: Math.max(0, prev.toolCount - 1) } : prev))
+      toast.success(`Tool "${tool.name}" deleted`)
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't delete this tool"))
+    } finally {
+      setPendingDeleteTool(null)
     }
   }
 
-  function confirmImportTools() {
-    if (!importToolsApiId || !importToolsPreview) return
-    const apiId = importToolsApiId
-    const toImport = importToolsPreview.filter((_, i) => importToolsSelected.has(i)).map((op, i) => operationToTool(op, apiId, i))
-    setToolsByApi((prev) => ({ ...prev, [apiId]: [...(prev[apiId] ?? []), ...toImport] }))
-    setImportToolsApiId(null)
-    toast.success(`${toImport.length} tool${toImport.length === 1 ? '' : 's'} imported`)
+  function renderApiCard(api: ConnectorApi) {
+    const tools = toolsByApi[api.id] ?? []
+    return (
+      <div key={api.id} className="rounded-xl border border-border-strong/15 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-ink">{api.name}</p>
+            <p className="truncate font-mono text-[11px] text-faint">{api.baseUrl}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={engineTone[api.engineType]}>{engineLabel[api.engineType]}</Badge>
+            <Badge tone="neutral">{authLabel[api.authType]}</Badge>
+            <StatusPill tone={api.isActive ? 'ok' : 'neutral'}>{api.isActive ? 'active' : 'inactive'}</StatusPill>
+            <Switch checked={api.isActive} onChange={() => toggleApiActive(api)} />
+            <button onClick={() => openEditApi(api)} className="rounded-md p-1.5 text-faint hover:bg-surface-raised hover:text-ink" title="Edit API">
+              <Pencil size={13} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-xs text-muted">{tools.length} callable MCP tools</p>
+          <Button variant="secondary" size="sm" onClick={() => openNewTool(api.id)}>
+            <Plus size={13} /> New tool
+          </Button>
+        </div>
+
+        {runResult && runResult.apiId === api.id && (
+          <div
+            className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs animate-fade-in ${
+              runResult.ok ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad'
+            }`}
+          >
+            {runResult.ok ? <Check size={13} /> : <X size={13} />}
+            <span className="font-mono">{runResult.tool}</span>
+            {runResult.ok ? 'ran successfully' : `failed — ${runResult.detail}`}
+          </div>
+        )}
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-faint">
+                <th className="pb-2 font-medium">Tool</th>
+                <th className="pb-2 font-medium">Method</th>
+                <th className="pb-2 font-medium">Path</th>
+                <th className="pb-2 font-medium">Cache</th>
+                <th className="pb-2 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/10">
+              {tools.map((t) => (
+                <tr key={t.id} className="group">
+                  <td className="py-2.5 font-mono text-xs text-ink">
+                    <button onClick={() => openEditTool(api.id, t)} className="flex items-center gap-1.5 hover:text-signal" title="Edit tool">
+                      <Wrench size={12} className="text-signal" /> {t.name}
+                      <ChevronRight size={11} className="text-faint" />
+                    </button>
+                  </td>
+                  <td className="py-2.5">
+                    <Badge tone={t.method === 'GET' ? 'info' : 'signal'}>{t.method}</Badge>
+                  </td>
+                  <td className="py-2.5 font-mono text-xs text-muted">{t.path}</td>
+                  <td className="py-2.5 text-xs text-muted">{t.cacheTtlSeconds ? `${t.cacheTtlSeconds}s TTL` : 'off'}</td>
+                  <td className="py-2.5">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => runTool(api.id, t)}
+                        disabled={runningId === t.id}
+                        className="rounded-md p-1.5 text-faint hover:bg-surface-raised hover:text-signal disabled:opacity-40"
+                        title="Run tool"
+                      >
+                        <Play size={13} className={runningId === t.id ? 'animate-pulse' : ''} />
+                      </button>
+                      <button
+                        onClick={() => setPendingDeleteTool({ apiId: api.id, tool: t })}
+                        className="rounded-md p-1.5 text-faint hover:bg-bad/10 hover:text-bad"
+                        title="Delete tool"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {tools.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-6 text-center text-xs text-faint">
+                    No tools mapped yet on this api.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
   }
 
   return (
     <AppShell title={connector.name} subtitle={connector.description} backTo="/connectors">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <StatusPill tone={statusTone(status)}>{status}</StatusPill>
+        <StatusPill tone={connector.status === 'active' ? 'ok' : connector.status === 'error' ? 'bad' : 'neutral'}>{connector.status}</StatusPill>
         <div className="flex items-center gap-2 rounded-full border border-border-strong/15 bg-surface px-3 py-1">
-          <Switch checked={status === 'active'} onChange={toggleConnectorActive} />
-          <span className="text-xs text-muted">{status === 'active' ? 'Enabled' : 'Disabled'}</span>
+          <Switch checked={connector.status === 'active'} onChange={toggleConnectorActive} />
+          <span className="text-xs text-muted">{connector.status === 'active' ? 'Enabled' : 'Disabled'}</span>
         </div>
         <span className="text-xs text-faint">
-          {connector.modules.length} module{connector.modules.length === 1 ? '' : 's'} · {apis.length} api{apis.length === 1 ? '' : 's'} ·{' '}
-          {totalTools(connector)} tools
+          {modules.length} module{modules.length === 1 ? '' : 's'} · {totalApis} api{totalApis === 1 ? '' : 's'} · {connector.toolCount} tools
         </span>
       </div>
 
       <div className="space-y-4">
-        {connector.modules.map((module) => (
+        {modules.map(({ module, apis }) => (
           <Card key={module.id}>
             <CardHeader>
               <div>
@@ -485,135 +541,30 @@ export default function ConnectorDetail() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4 pt-2">
-              {module.apis.map((api) => {
-                const tools = toolsByApi[api.id] ?? []
-                return (
-                  <div key={api.id} className="rounded-xl border border-border-strong/15 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-ink">{api.name}</p>
-                        <p className="truncate font-mono text-[11px] text-faint">{api.baseUrl}</p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge tone={typeTone[api.type]}>{api.type}</Badge>
-                        <Badge tone="neutral">{api.authType}</Badge>
-                        <StatusPill tone={statusTone(api.status)}>{api.status}</StatusPill>
-                        <Switch checked={api.status === 'active'} onChange={() => toggleApiActive(api)} />
-                        <button
-                          onClick={() => openEditApi(api)}
-                          className="rounded-md p-1.5 text-faint hover:bg-surface-raised hover:text-ink"
-                          title="Edit API"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between">
-                      <p className="text-xs text-muted">{tools.length} callable MCP tools</p>
-                      <div className="flex gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => openImportTools(api.id)}>
-                          <Upload size={13} /> Import tools
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={() => openNewTool(api.id)}>
-                          <Plus size={13} /> New tool
-                        </Button>
-                      </div>
-                    </div>
-
-                    {runResult && runResult.apiId === api.id && (
-                      <div
-                        className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs animate-fade-in ${
-                          runResult.ok ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad'
-                        }`}
-                      >
-                        {runResult.ok ? <Check size={13} /> : <X size={13} />}
-                        <span className="font-mono">{runResult.tool}</span>
-                        {runResult.ok ? 'ran successfully' : `failed — ${api.name} is reporting errors`}
-                      </div>
-                    )}
-
-                    <div className="mt-3 overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead>
-                          <tr className="text-[11px] uppercase tracking-wide text-faint">
-                            <th className="pb-2 font-medium">Tool</th>
-                            <th className="pb-2 font-medium">{api.type === 'REST' ? 'Method' : ''}</th>
-                            <th className="pb-2 font-medium">{api.type === 'REST' ? 'Path' : 'Operation'}</th>
-                            <th className="pb-2 font-medium">Cache</th>
-                            <th className="pb-2 font-medium text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/10">
-                          {tools.map((t) => (
-                            <tr key={t.id} className="group">
-                              <td className="py-2.5 font-mono text-xs text-ink">
-                                <button
-                                  onClick={() => openToolDetails(api.id, t)}
-                                  className="flex items-center gap-1.5 hover:text-signal"
-                                  title="View payload and parameters"
-                                >
-                                  <Wrench size={12} className="text-signal" /> {t.name}
-                                  <ChevronRight size={11} className="text-faint" />
-                                </button>
-                              </td>
-                              <td className="py-2.5">
-                                {api.type === 'REST' ? (
-                                  <Badge tone={t.method === 'GET' ? 'info' : 'signal'}>{t.method}</Badge>
-                                ) : (
-                                  t.operationKind && <Badge tone="neutral">{t.operationKind}</Badge>
-                                )}
-                              </td>
-                              <td className="py-2.5 font-mono text-xs text-muted">{api.type === 'REST' ? t.path : t.operation || t.name}</td>
-                              <td className="py-2.5 text-xs text-muted">{t.cached ? '60s TTL' : 'off'}</td>
-                              <td className="py-2.5">
-                                <div className="flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                                  <button
-                                    onClick={() => runTool(api, t)}
-                                    disabled={runningId === t.id}
-                                    className="rounded-md p-1.5 text-faint hover:bg-surface-raised hover:text-signal disabled:opacity-40"
-                                    title="Run tool"
-                                  >
-                                    <Play size={13} className={runningId === t.id ? 'animate-pulse' : ''} />
-                                  </button>
-                                  <button
-                                    onClick={() => openToolDetails(api.id, t)}
-                                    className="rounded-md p-1.5 text-faint hover:bg-surface-raised hover:text-ink"
-                                    title="Edit tool"
-                                  >
-                                    <Settings2 size={13} />
-                                  </button>
-                                  <button
-                                    onClick={() => setPendingDeleteTool({ apiId: api.id, tool: t })}
-                                    className="rounded-md p-1.5 text-faint hover:bg-bad/10 hover:text-bad"
-                                    title="Delete tool"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                          {tools.length === 0 && (
-                            <tr>
-                              <td colSpan={5} className="py-6 text-center text-xs text-faint">
-                                No tools mapped yet on this api.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )
-              })}
-
+              {apis.map(renderApiCard)}
               <Button variant="secondary" size="sm" onClick={() => openNewApi(module.id)}>
                 <Plus size={13} /> Add API to this module
               </Button>
             </CardContent>
           </Card>
         ))}
+
+        {unassignedApis.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Unassigned</CardTitle>
+                <CardDescription>APIs not yet grouped into a module.</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              {unassignedApis.map(renderApiCard)}
+              <Button variant="secondary" size="sm" onClick={() => openNewApi('unassigned')}>
+                <Plus size={13} /> Add API
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="mt-4">
@@ -623,258 +574,95 @@ export default function ConnectorDetail() {
       </div>
 
       <Modal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        title="New tool"
-        description={targetApi ? `Map an endpoint on ${targetApi.name} to a callable MCP tool` : undefined}
-        className="max-w-3xl"
+        open={!!toolModalTarget}
+        onClose={() => setToolModalTarget(null)}
+        title={toolModalTarget?.tool ? 'Edit tool' : 'New tool'}
+        description={
+          toolModalTarget ? `Map an endpoint on ${findApi(toolModalTarget.apiId)?.name ?? 'this API'} to a callable MCP tool` : undefined
+        }
+        className="max-w-2xl"
       >
         <div className="space-y-4">
           <Field label="Tool name" hint="snake_case, shown to the LLM as the callable function name">
             <Input placeholder="get_customer_balance" value={toolName} onChange={(e) => setToolName(e.target.value)} />
           </Field>
 
-          {targetApi?.type === 'REST' ? (
-            <div className="grid grid-cols-3 gap-3">
-              <Field label="Method">
-                <Select value={toolMethod} onChange={(e) => setToolMethod(e.target.value as ConnectorTool['method'])}>
-                  <option>GET</option>
-                  <option>POST</option>
-                  <option>PUT</option>
-                  <option>DELETE</option>
-                </Select>
-              </Field>
-              <div className="col-span-2">
-                <Field label="Path">
-                  <Input placeholder="/customers/{id}/balance" value={toolPath} onChange={(e) => setToolPath(e.target.value)} />
-                </Field>
-              </div>
-            </div>
-          ) : (
-            <div className={targetApi?.type === 'GraphQL' ? 'grid grid-cols-3 gap-3' : ''}>
-              <div className={targetApi?.type === 'GraphQL' ? 'col-span-2' : ''}>
-                <Field label={operationLabel[targetApi?.type ?? 'SOAP']}>
-                  <Input
-                    placeholder={operationPlaceholder[targetApi?.type ?? 'SOAP']}
-                    value={toolOperation}
-                    onChange={(e) => setToolOperation(e.target.value)}
-                  />
-                </Field>
-              </div>
-              {targetApi?.type === 'GraphQL' && (
-                <Field label="Operation type">
-                  <Select value={toolOperationKind} onChange={(e) => setToolOperationKind(e.target.value as 'query' | 'mutation')}>
-                    <option value="query">Query</option>
-                    <option value="mutation">Mutation</option>
-                  </Select>
-                </Field>
-              )}
-            </div>
-          )}
-
-          <Field label="Description" hint="Helps the model decide when to call this tool.">
-            <Textarea rows={2} placeholder="Returns the outstanding balance for a customer." />
-          </Field>
-
-          <ParamsEditor params={toolParams} onChange={setToolParams} />
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Sample request body (JSON)" hint="Optional — leave blank to auto-generate a placeholder.">
-              <Textarea
-                rows={4}
-                className="font-mono text-xs"
-                placeholder="{}"
-                value={toolSampleRequestText}
-                onChange={(e) => setToolSampleRequestText(e.target.value)}
-              />
-            </Field>
-            <Field label="Sample response body (JSON)" hint="Optional — leave blank to auto-generate a placeholder.">
-              <Textarea
-                rows={4}
-                className="font-mono text-xs"
-                placeholder="{}"
-                value={toolSampleResponseText}
-                onChange={(e) => setToolSampleResponseText(e.target.value)}
-              />
-            </Field>
-          </div>
-          {(!isValidJsonOrEmpty(toolSampleRequestText) || !isValidJsonOrEmpty(toolSampleResponseText)) && (
-            <p className="text-xs text-bad">Sample request/response must be valid JSON, or left blank.</p>
-          )}
-
-          <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
-            <Button variant="secondary" size="sm" onClick={() => setEditorOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!toolName || !isValidJsonOrEmpty(toolSampleRequestText) || !isValidJsonOrEmpty(toolSampleResponseText)}
-              onClick={saveTool}
-            >
-              Save tool
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={!!importToolsApiId}
-        onClose={() => setImportToolsApiId(null)}
-        title="Import tools"
-        description={(() => {
-          const importApi = apis.find((a) => a.id === importToolsApiId)
-          return importApi ? `${specHint[importApi.type]} — for ${importApi.name}.` : undefined
-        })()}
-        className="max-w-2xl"
-      >
-        <div className="space-y-4">
-          <input ref={importFileInputRef} type="file" accept=".json,.graphql,.gql,.txt,.wsdl,.xml" className="hidden" onChange={handleImportFileUpload} />
-          <button
-            onClick={() => importFileInputRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-border-strong/25 py-6 text-muted transition-colors hover:border-signal/40 hover:text-signal"
-          >
-            <FileJson size={20} />
-            <span className="text-sm font-medium">Click to upload a spec file</span>
-            <span className="text-[11px] text-faint">or paste below</span>
-          </button>
-
-          <Field label="Spec contents">
-            <Textarea
-              rows={7}
-              className="font-mono text-xs"
-              value={importToolsText}
-              onChange={(e) => {
-                setImportToolsText(e.target.value)
-                setImportToolsPreview(null)
-                setImportToolsError('')
-              }}
-            />
-          </Field>
-
-          {importToolsError && <p className="text-xs text-bad">{importToolsError}</p>}
-
-          {importToolsPreview && importToolsPreview.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-medium text-muted">
-                {importToolsSelected.size} of {importToolsPreview.length} operations selected
-              </p>
-              <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border-strong/15 p-2">
-                {importToolsPreview.map((op, i) => (
-                  <label key={i} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-canvas/40">
-                    <input type="checkbox" checked={importToolsSelected.has(i)} onChange={() => toggleImportSelected(i)} />
-                    <span className="font-mono text-ink">{op.name}</span>
-                    <span className="text-faint">
-                      {op.method ? `${op.method} ${op.path}` : op.operation} · {op.params.length} param{op.params.length === 1 ? '' : 's'}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
-            <Button variant="secondary" size="sm" onClick={() => setImportToolsApiId(null)}>
-              Cancel
-            </Button>
-            {importToolsPreview ? (
-              <Button variant="primary" size="sm" disabled={importToolsSelected.size === 0} onClick={confirmImportTools}>
-                <Check size={13} /> Import {importToolsSelected.size} tool{importToolsSelected.size === 1 ? '' : 's'}
-              </Button>
-            ) : (
-              <Button variant="primary" size="sm" disabled={!importToolsText.trim()} onClick={parseImportPreview}>
-                Parse
-              </Button>
-            )}
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={!!viewingTool}
-        onClose={() => setViewingTool(null)}
-        title={viewingTool ? viewingTool.tool.name : ''}
-        description="Full request/response contract for this tool"
-        className="max-w-3xl"
-      >
-        {viewingTool && (() => {
-          const owningApi = apis.find((a) => a.id === viewingTool.apiId)
-          const isRest = owningApi?.type === 'REST'
-          const invalidJson = !isValidJsonOrEmpty(viewSampleRequestText) || !isValidJsonOrEmpty(viewSampleResponseText)
-          return (
-          <div className="space-y-5">
-            {isRest ? (
-              <div className="grid grid-cols-3 gap-3">
-                <Field label="Method">
-                  <Select value={viewingTool.tool.method} disabled className="opacity-60">
-                    <option>{viewingTool.tool.method}</option>
-                  </Select>
-                </Field>
-                <div className="col-span-2">
-                  <Field label="Path">
-                    <Input value={viewPath} onChange={(e) => setViewPath(e.target.value)} className="font-mono" />
-                  </Field>
-                </div>
-              </div>
-            ) : (
-              <div className={owningApi?.type === 'GraphQL' ? 'grid grid-cols-3 gap-3' : ''}>
-                <div className={owningApi?.type === 'GraphQL' ? 'col-span-2' : ''}>
-                  <Field label={operationLabel[owningApi?.type ?? 'SOAP']}>
-                    <Input
-                      className="font-mono"
-                      placeholder={operationPlaceholder[owningApi?.type ?? 'SOAP']}
-                      value={viewOperation}
-                      onChange={(e) => setViewOperation(e.target.value)}
-                    />
-                  </Field>
-                </div>
-                {owningApi?.type === 'GraphQL' && (
-                  <Field label="Operation type">
-                    <Select value={viewOperationKind} onChange={(e) => setViewOperationKind(e.target.value as 'query' | 'mutation')}>
-                      <option value="query">Query</option>
-                      <option value="mutation">Mutation</option>
+          {(() => {
+            const engineType = toolModalTarget ? findApi(toolModalTarget.apiId)?.engineType : undefined
+            const isRest = !engineType || engineType === 'REST'
+            const pathLabel = engineType === 'SOAP' ? 'SOAP action / operation name' : engineType === 'GRAPHQL' ? 'GraphQL operation name' : 'Path'
+            const pathPlaceholder =
+              engineType === 'SOAP' ? 'CreatePurchaseOrder' : engineType === 'GRAPHQL' ? 'getCustomerBalance' : '/customers/{id}/balance'
+            return (
+              <div className={isRest ? 'grid grid-cols-3 gap-3' : ''}>
+                {isRest && (
+                  <Field label="Method">
+                    <Select value={toolMethod} onChange={(e) => setToolMethod(e.target.value as Tool['method'])}>
+                      <option>GET</option>
+                      <option>POST</option>
+                      <option>PUT</option>
+                      <option>DELETE</option>
                     </Select>
                   </Field>
                 )}
+                <div className={isRest ? 'col-span-2' : ''}>
+                  <Field label={pathLabel}>
+                    <Input placeholder={pathPlaceholder} value={toolPath} onChange={(e) => setToolPath(e.target.value)} />
+                  </Field>
+                </div>
               </div>
-            )}
-            <Field label="Tool name">
-              <Input value={viewName} onChange={(e) => setViewName(e.target.value)} className="font-mono" />
-            </Field>
+            )
+          })()}
 
-            <ParamsEditor params={viewParams} onChange={setViewParams} />
+          <Field label="Description" hint="Helps the model decide when to call this tool.">
+            <Textarea rows={2} placeholder="Returns the outstanding balance for a customer." value={toolDescription} onChange={(e) => setToolDescription(e.target.value)} />
+          </Field>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Sample request body (JSON)">
-                <Textarea
-                  rows={5}
-                  className="font-mono text-[11px]"
-                  value={viewSampleRequestText}
-                  onChange={(e) => setViewSampleRequestText(e.target.value)}
-                />
-              </Field>
-              <Field label="Sample response body (JSON)">
-                <Textarea
-                  rows={5}
-                  className="font-mono text-[11px]"
-                  value={viewSampleResponseText}
-                  onChange={(e) => setViewSampleResponseText(e.target.value)}
-                />
-              </Field>
-            </div>
-            {invalidJson && <p className="text-xs text-bad">Sample request/response must be valid JSON, or left blank.</p>}
+          <Field label="Cache TTL (seconds)" hint="0 disables caching.">
+            <Input
+              type="number"
+              min={0}
+              value={toolCacheTtl}
+              onChange={(e) => setToolCacheTtl(Number(e.target.value) || 0)}
+            />
+          </Field>
 
-            <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
-              <Button variant="secondary" size="sm" onClick={() => setViewingTool(null)}>
-                Close
-              </Button>
-              <Button variant="primary" size="sm" disabled={invalidJson} onClick={saveToolDetails}>
-                Save changes
-              </Button>
-            </div>
+          <Field label="Parameters (JSON)" hint="Optional — the parameter schema passed to the model.">
+            <Textarea rows={5} className="font-mono text-xs" placeholder="{}" value={toolParamsText} onChange={(e) => setToolParamsText(e.target.value)} />
+          </Field>
+          {!isValidJsonOrEmpty(toolParamsText) && <p className="text-xs text-bad">Parameters must be valid JSON, or left blank.</p>}
+
+          <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
+            <Button variant="secondary" size="sm" onClick={() => setToolModalTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" disabled={!toolName || !isValidJsonOrEmpty(toolParamsText) || savingTool} onClick={saveToolModal}>
+              {savingTool ? 'Saving…' : toolModalTarget?.tool ? 'Save changes' : 'Save tool'}
+            </Button>
           </div>
-          )
-        })()}
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!runningToolTarget}
+        onClose={() => setRunningToolTarget(null)}
+        title={runningToolTarget ? `Run ${runningToolTarget.tool.name}` : undefined}
+        description="Dispatches the call live against the API's configured base URL."
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <Field label="Input (JSON)">
+            <Textarea rows={6} className="font-mono text-xs" value={runInputText} onChange={(e) => setRunInputText(e.target.value)} />
+          </Field>
+          <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
+            <Button variant="secondary" size="sm" onClick={() => setRunningToolTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={confirmRunTool}>
+              <Play size={13} /> Run
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal
@@ -882,9 +670,7 @@ export default function ConnectorDetail() {
         onClose={() => setPendingDeleteTool(null)}
         title="Delete tool"
         description={
-          pendingDeleteTool
-            ? `This removes "${pendingDeleteTool.tool.name}" from every MCP server it's exposed on. This cannot be undone.`
-            : undefined
+          pendingDeleteTool ? `This removes "${pendingDeleteTool.tool.name}" from every MCP server it's exposed on. This cannot be undone.` : undefined
         }
       >
         <div className="flex justify-end gap-2">
@@ -909,62 +695,67 @@ export default function ConnectorDetail() {
             <Field label="API name">
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
             </Field>
-            <Field label="Description">
-              <Textarea rows={2} value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
-            </Field>
-            <Field label="Module" hint="Move this API to a different module on the same connector.">
-              <Select value={editModuleId} onChange={(e) => setEditModuleId(e.target.value)}>
-                {connector.modules.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
+            <Field label="Module" hint="Move this API to a different module, or unassign it.">
+              <Select value={editGroupId} onChange={(e) => setEditGroupId(Number(e.target.value))}>
+                <option value={0}>Unassigned</option>
+                {modules.map(({ module }) => (
+                  <option key={module.id} value={module.id}>
+                    {module.name}
                   </option>
                 ))}
               </Select>
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Type">
-                <Select value={editType} onChange={(e) => setEditType(e.target.value as ConnectorType)}>
-                  <option>REST</option>
-                  <option>GraphQL</option>
-                  <option>SOAP</option>
-                  <option>Database</option>
+                <Select value={editEngineType} disabled className="opacity-60">
+                  <option>{engineLabel[editEngineType]}</option>
                 </Select>
               </Field>
               <Field label="Authentication">
-                <Select value={editAuthType} onChange={(e) => setEditAuthType(e.target.value as AuthType)}>
-                  <option>OAuth2</option>
-                  <option>Bearer</option>
-                  <option>API Key</option>
-                  <option>Basic</option>
-                  <option>None</option>
+                <Select value={editAuthType} onChange={(e) => setEditAuthType(e.target.value as BackendAuthType)}>
+                  {AUTH_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
                 </Select>
               </Field>
             </div>
-            <Field label={editType === 'Database' ? 'Connection string host' : 'Base URL'}>
+            <Field label="Base URL">
               <Input value={editBaseUrl} onChange={(e) => setEditBaseUrl(e.target.value)} className="font-mono" />
             </Field>
 
-            {editAuthType === 'OAuth2' && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Client ID">
-                  <Input value={editOauthClientId} onChange={(e) => setEditOauthClientId(e.target.value)} />
+            {editAuthType === 'oauth2' && (
+              <div className="space-y-3">
+                <Field label="Token URL" hint="Leave blank to keep the existing value.">
+                  <Input value={editOauthTokenUrl} onChange={(e) => setEditOauthTokenUrl(e.target.value)} />
                 </Field>
-                <Field label="Scopes" hint="Comma-separated">
-                  <Input value={editOauthScopes} onChange={(e) => setEditOauthScopes(e.target.value)} />
-                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Client ID">
+                    <Input value={editOauthClientId} onChange={(e) => setEditOauthClientId(e.target.value)} />
+                  </Field>
+                  <Field label="Client secret" hint="Leave blank to keep the existing secret.">
+                    <Input type="password" placeholder="••••••••••••" value={editOauthClientSecret} onChange={(e) => setEditOauthClientSecret(e.target.value)} />
+                  </Field>
+                </div>
               </div>
             )}
-            {editAuthType === 'API Key' && (
+            {editAuthType === 'bearer' && (
+              <Field label="Bearer token" hint="Leave blank to keep the existing token.">
+                <Input type="password" placeholder="••••••••••••" value={editBearerToken} onChange={(e) => setEditBearerToken(e.target.value)} />
+              </Field>
+            )}
+            {editAuthType === 'api_key' && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Header name">
                   <Input value={editApiKeyHeader} onChange={(e) => setEditApiKeyHeader(e.target.value)} />
                 </Field>
                 <Field label="API key" hint="Leave blank to keep the existing key.">
-                  <Input type="password" placeholder="••••••••••••" value={editApiKeySecret} onChange={(e) => setEditApiKeySecret(e.target.value)} />
+                  <Input type="password" placeholder="••••••••••••" value={editApiKeyValue} onChange={(e) => setEditApiKeyValue(e.target.value)} />
                 </Field>
               </div>
             )}
-            {editAuthType === 'Basic' && (
+            {editAuthType === 'basic' && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Username">
                   <Input value={editBasicUsername} onChange={(e) => setEditBasicUsername(e.target.value)} />
@@ -979,8 +770,8 @@ export default function ConnectorDetail() {
               <Button variant="secondary" size="sm" onClick={() => setEditingApi(null)}>
                 Cancel
               </Button>
-              <Button variant="primary" size="sm" disabled={!editName} onClick={saveApiEdit}>
-                Save changes
+              <Button variant="primary" size="sm" disabled={!editName || savingApi} onClick={saveApiEdit}>
+                {savingApi ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
           </div>
@@ -1005,77 +796,83 @@ export default function ConnectorDetail() {
             <Button variant="secondary" size="sm" onClick={() => setModuleModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" disabled={!newModuleName} onClick={saveNewModule}>
-              Add module
+            <Button variant="primary" size="sm" disabled={!newModuleName || savingModule} onClick={saveNewModule}>
+              {savingModule ? 'Adding…' : 'Add module'}
             </Button>
           </div>
         </div>
       </Modal>
 
       <Modal
-        open={!!newApiModuleId}
-        onClose={() => setNewApiModuleId(null)}
+        open={newApiGroupId !== null}
+        onClose={() => setNewApiGroupId(null)}
         title="New API"
-        description={
-          newApiModuleId ? `Add an API surface to ${connector.modules.find((m) => m.id === newApiModuleId)?.name}.` : undefined
-        }
+        description={(() => {
+          if (newApiGroupId === 'unassigned') return 'Add an unassigned API to this connector.'
+          const m = modules.find((g) => g.module.id === newApiGroupId)
+          return m ? `Add an API surface to ${m.module.name}.` : undefined
+        })()}
         className="max-w-xl"
       >
         <div className="space-y-4">
           <Field label="API name">
             <Input placeholder="e.g. Bidding SOAP API" value={newApiName} onChange={(e) => setNewApiName(e.target.value)} />
           </Field>
-          <Field label="Description">
-            <Textarea rows={2} value={newApiDescription} onChange={(e) => setNewApiDescription(e.target.value)} />
-          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Type">
-              <Select value={newApiType} onChange={(e) => setNewApiType(e.target.value as ConnectorType)}>
-                <option>REST</option>
-                <option>GraphQL</option>
-                <option>SOAP</option>
-                <option>Database</option>
+              <Select value={newApiEngineType} onChange={(e) => setNewApiEngineType(e.target.value as BackendEngineType)}>
+                {ENGINE_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {engineLabel[o.value]}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="Authentication">
-              <Select value={newApiAuthType} onChange={(e) => setNewApiAuthType(e.target.value as AuthType)}>
-                <option>OAuth2</option>
-                <option>Bearer</option>
-                <option>API Key</option>
-                <option>Basic</option>
-                <option>None</option>
+              <Select value={newApiAuthType} onChange={(e) => setNewApiAuthType(e.target.value as BackendAuthType)}>
+                {AUTH_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </Select>
             </Field>
           </div>
-          <Field label={newApiType === 'Database' ? 'Connection string host' : 'Base URL'}>
-            <Input
-              placeholder={newApiType === 'Database' ? 'db.internal:5432/prod' : 'https://api.example.com/v1'}
-              value={newApiBaseUrl}
-              onChange={(e) => setNewApiBaseUrl(e.target.value)}
-            />
+          <Field label="Base URL">
+            <Input placeholder="https://api.example.com/v1" value={newApiBaseUrl} onChange={(e) => setNewApiBaseUrl(e.target.value)} />
           </Field>
 
-          {newApiAuthType === 'OAuth2' && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Client ID">
-                <Input value={newApiOauthClientId} onChange={(e) => setNewApiOauthClientId(e.target.value)} />
+          {newApiAuthType === 'oauth2' && (
+            <div className="space-y-3">
+              <Field label="Token URL">
+                <Input value={newApiOauthTokenUrl} onChange={(e) => setNewApiOauthTokenUrl(e.target.value)} />
               </Field>
-              <Field label="Scopes" hint="Comma-separated">
-                <Input value={newApiOauthScopes} onChange={(e) => setNewApiOauthScopes(e.target.value)} />
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Client ID">
+                  <Input value={newApiOauthClientId} onChange={(e) => setNewApiOauthClientId(e.target.value)} />
+                </Field>
+                <Field label="Client secret">
+                  <Input type="password" placeholder="••••••••••••" value={newApiOauthClientSecret} onChange={(e) => setNewApiOauthClientSecret(e.target.value)} />
+                </Field>
+              </div>
             </div>
           )}
-          {newApiAuthType === 'API Key' && (
+          {newApiAuthType === 'bearer' && (
+            <Field label="Bearer token">
+              <Input type="password" placeholder="••••••••••••" value={newApiBearerToken} onChange={(e) => setNewApiBearerToken(e.target.value)} />
+            </Field>
+          )}
+          {newApiAuthType === 'api_key' && (
             <div className="grid grid-cols-2 gap-3">
               <Field label="Header name">
                 <Input placeholder="X-API-Key" value={newApiKeyHeader} onChange={(e) => setNewApiKeyHeader(e.target.value)} />
               </Field>
               <Field label="API key">
-                <Input type="password" placeholder="••••••••••••" value={newApiKeySecret} onChange={(e) => setNewApiKeySecret(e.target.value)} />
+                <Input type="password" placeholder="••••••••••••" value={newApiKeyValue} onChange={(e) => setNewApiKeyValue(e.target.value)} />
               </Field>
             </div>
           )}
-          {newApiAuthType === 'Basic' && (
+          {newApiAuthType === 'basic' && (
             <div className="grid grid-cols-2 gap-3">
               <Field label="Username">
                 <Input value={newApiBasicUsername} onChange={(e) => setNewApiBasicUsername(e.target.value)} />
@@ -1087,11 +884,11 @@ export default function ConnectorDetail() {
           )}
 
           <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
-            <Button variant="secondary" size="sm" onClick={() => setNewApiModuleId(null)}>
+            <Button variant="secondary" size="sm" onClick={() => setNewApiGroupId(null)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" disabled={!newApiName} onClick={saveNewApi}>
-              Add API
+            <Button variant="primary" size="sm" disabled={!newApiName || savingNewApi} onClick={saveNewApi}>
+              {savingNewApi ? 'Adding…' : 'Add API'}
             </Button>
           </div>
         </div>

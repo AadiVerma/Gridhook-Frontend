@@ -1,89 +1,102 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
-import { initialConnectors, Connector, Module, Api, ApiStatus } from './mock-data'
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
+import { api, ApiError } from './api-client'
+import { useAuth } from './auth-store'
+import { ApiStatus } from './mock-data'
+
+// Matches the flat aggregate shape the real backend returns for GET /connectors —
+// unlike the connector-drafts store, there's no nested modules/apis here: the
+// backend has no "module" grouping concept, just per-connector rollup counts.
+export type BackendEngineType = 'REST' | 'GRAPHQL' | 'SOAP'
+export type BackendAuthType = 'oauth2' | 'bearer' | 'api_key' | 'basic' | 'login_token' | 'none'
+
+export interface ConnectorListItem {
+  id: number
+  name: string
+  glyph: string
+  description: string
+  engineTypes: BackendEngineType[]
+  authTypes: BackendAuthType[]
+  apiCount: number
+  toolCount: number
+  moduleCount: number
+  status: ApiStatus
+  lastSync: string | null
+}
+
+interface ConnectorsPage {
+  data: ConnectorListItem[]
+  page: number
+  pageSize: number
+  total: number
+}
 
 interface ConnectorsStore {
-  connectors: Connector[]
-  addConnector: (c: Connector) => void
-  deleteConnector: (id: string) => void
-  setConnectorApisStatus: (connectorId: string, status: ApiStatus, touchLastSync?: boolean) => void
-  setApiStatus: (connectorId: string, apiId: string, status: ApiStatus) => void
-  updateApi: (connectorId: string, apiId: string, patch: Partial<Omit<Api, 'id' | 'moduleId'>>) => void
-  moveApi: (connectorId: string, apiId: string, targetModuleId: string) => void
-  addModule: (connectorId: string, module: Module) => void
-  addApi: (connectorId: string, moduleId: string, api: Api) => void
+  connectors: ConnectorListItem[]
+  loading: boolean
+  error: string | null
+  refetch: () => Promise<void>
+  toggleConnector: (id: number, active: boolean) => Promise<void>
+  deleteConnector: (id: number) => Promise<void>
+  runHealthCheck: (id: number) => Promise<void>
 }
 
 const ConnectorsContext = createContext<ConnectorsStore | null>(null)
 
 export function ConnectorsProvider({ children }: { children: ReactNode }) {
-  const [connectors, setConnectors] = useState<Connector[]>(initialConnectors)
+  const { status } = useAuth()
+  const [connectors, setConnectors] = useState<ConnectorListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  function mapConnector(connectorId: string, fn: (c: Connector) => Connector) {
-    setConnectors((prev) => prev.map((c) => (c.id === connectorId ? fn(c) : c)))
+  const fetchConnectors = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.get<ConnectorsPage>('/connectors')
+      setConnectors(res.data)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to load connectors. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Gate on auth status — this provider wraps the whole app (including /login), so
+  // fetching unconditionally would fire an unauthenticated request on every page load
+  // and its 401 would trip the global unauthorized handler, clobbering a token that's
+  // mid-flight from a fresh login.
+  useEffect(() => {
+    if (status !== 'authenticated') {
+      setConnectors([])
+      setError(null)
+      setLoading(status === 'loading')
+      return
+    }
+    fetchConnectors()
+  }, [status, fetchConnectors])
+
+  function replaceConnector(updated: ConnectorListItem) {
+    setConnectors((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
   }
 
-  function addConnector(c: Connector) {
-    setConnectors((prev) => [c, ...prev])
+  async function toggleConnector(id: number, active: boolean) {
+    const updated = await api.post<ConnectorListItem>(`/connectors/${id}/toggle`, { active })
+    replaceConnector(updated)
   }
 
-  function deleteConnector(id: string) {
+  async function deleteConnector(id: number) {
+    await api.delete(`/connectors/${id}`)
     setConnectors((prev) => prev.filter((c) => c.id !== id))
   }
 
-  function setConnectorApisStatus(connectorId: string, status: ApiStatus, touchLastSync = false) {
-    mapConnector(connectorId, (c) => ({
-      ...c,
-      modules: c.modules.map((m) => ({
-        ...m,
-        apis: m.apis.map((a) => ({ ...a, status, ...(touchLastSync ? { lastSync: new Date().toISOString() } : {}) })),
-      })),
-    }))
-  }
-
-  function setApiStatus(connectorId: string, apiId: string, status: ApiStatus) {
-    mapConnector(connectorId, (c) => ({
-      ...c,
-      modules: c.modules.map((m) => ({ ...m, apis: m.apis.map((a) => (a.id === apiId ? { ...a, status } : a)) })),
-    }))
-  }
-
-  function updateApi(connectorId: string, apiId: string, patch: Partial<Omit<Api, 'id' | 'moduleId'>>) {
-    mapConnector(connectorId, (c) => ({
-      ...c,
-      modules: c.modules.map((m) => ({ ...m, apis: m.apis.map((a) => (a.id === apiId ? { ...a, ...patch } : a)) })),
-    }))
-  }
-
-  function moveApi(connectorId: string, apiId: string, targetModuleId: string) {
-    mapConnector(connectorId, (c) => {
-      const api = c.modules.flatMap((m) => m.apis).find((a) => a.id === apiId)
-      if (!api || api.moduleId === targetModuleId) return c
-      const movedApi = { ...api, moduleId: targetModuleId }
-      return {
-        ...c,
-        modules: c.modules.map((m) => {
-          if (m.id === api.moduleId) return { ...m, apis: m.apis.filter((a) => a.id !== apiId) }
-          if (m.id === targetModuleId) return { ...m, apis: [...m.apis, movedApi] }
-          return m
-        }),
-      }
-    })
-  }
-
-  function addModule(connectorId: string, module: Module) {
-    mapConnector(connectorId, (c) => ({ ...c, modules: [...c.modules, module] }))
-  }
-
-  function addApi(connectorId: string, moduleId: string, api: Api) {
-    mapConnector(connectorId, (c) => ({
-      ...c,
-      modules: c.modules.map((m) => (m.id === moduleId ? { ...m, apis: [...m.apis, api] } : m)),
-    }))
+  async function runHealthCheck(id: number) {
+    const updated = await api.post<ConnectorListItem>(`/connectors/${id}/health-check`)
+    replaceConnector(updated)
   }
 
   return (
     <ConnectorsContext.Provider
-      value={{ connectors, addConnector, deleteConnector, setConnectorApisStatus, setApiStatus, updateApi, moveApi, addModule, addApi }}
+      value={{ connectors, loading, error, refetch: fetchConnectors, toggleConnector, deleteConnector, runHealthCheck }}
     >
       {children}
     </ConnectorsContext.Provider>

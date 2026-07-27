@@ -382,6 +382,8 @@ export function parseToolsSpec(text: string, apiType: ConnectorType): { operatio
   }
 }
 
+// Seeds the connector-drafts store (ConnectorDetail/ConnectorNew, still local-only
+// pending a real module/api backend) and the audit log mock entries below.
 export const initialConnectors: Connector[] = [
   {
     id: 'con_stripe', name: 'Stripe Billing', glyph: 'S', tint: 'violet',
