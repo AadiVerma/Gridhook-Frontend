@@ -21,6 +21,9 @@ import {
   AUTH_TYPE_OPTIONS,
 } from '@/lib/connector-api'
 import { ApiError } from '@/lib/api-client'
+import { ToolParamsEditor } from '@/components/tool-params/ToolParamsEditor'
+import { CodeEditor } from '@/components/tool-params/CodeEditor'
+import { createEmptyParamsState, parseToolParameters, buildToolParameters, isToolParamsValid, ToolParamsFormState } from '@/lib/tool-params'
 
 const engineTone: Record<BackendEngineType, Tone> = {
   REST: 'signal',
@@ -37,16 +40,6 @@ const authLabel = Object.fromEntries(AUTH_TYPE_OPTIONS.map((o) => [o.value, o.la
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof ApiError ? err.message : fallback
-}
-
-function isValidJsonOrEmpty(text: string) {
-  if (!text.trim()) return true
-  try {
-    JSON.parse(text)
-    return true
-  } catch {
-    return false
-  }
 }
 
 interface TargetTool {
@@ -104,7 +97,7 @@ export default function ConnectorDetail() {
   const [toolMethod, setToolMethod] = useState<Tool['method']>('GET')
   const [toolPath, setToolPath] = useState('')
   const [toolDescription, setToolDescription] = useState('')
-  const [toolParamsText, setToolParamsText] = useState('{}')
+  const [toolParamsState, setToolParamsState] = useState<ToolParamsFormState>(createEmptyParamsState('REST'))
   const [toolCacheTtl, setToolCacheTtl] = useState(0)
   const [savingTool, setSavingTool] = useState(false)
 
@@ -342,12 +335,13 @@ export default function ConnectorDetail() {
   }
 
   function openNewTool(apiId: number) {
+    const engineType = findApi(apiId)?.engineType ?? 'REST'
     setToolModalTarget({ apiId, tool: null })
     setToolName('')
-    setToolMethod(findApi(apiId)?.engineType === 'REST' ? 'GET' : 'POST')
+    setToolMethod(engineType === 'REST' ? 'GET' : 'POST')
     setToolPath('')
     setToolDescription('')
-    setToolParamsText('{}')
+    setToolParamsState(createEmptyParamsState(engineType))
     setToolCacheTtl(0)
   }
 
@@ -357,7 +351,7 @@ export default function ConnectorDetail() {
     setToolMethod(tool.method)
     setToolPath(tool.path)
     setToolDescription(tool.description ?? '')
-    setToolParamsText(JSON.stringify(tool.parameters ?? {}, null, 2))
+    setToolParamsState(parseToolParameters(tool.engineType, tool.parameters))
     setToolCacheTtl(tool.cacheTtlSeconds)
   }
 
@@ -366,7 +360,7 @@ export default function ConnectorDetail() {
     const { apiId, tool } = toolModalTarget
     let parameters: unknown
     try {
-      parameters = toolParamsText.trim() ? JSON.parse(toolParamsText) : {}
+      parameters = buildToolParameters(toolParamsState)
     } catch {
       toast.error('Parameters must be valid JSON')
       return
@@ -627,16 +621,19 @@ export default function ConnectorDetail() {
             />
           </Field>
 
-          <Field label="Parameters (JSON)" hint="Optional — the parameter schema passed to the model.">
-            <Textarea rows={5} className="font-mono text-xs" placeholder="{}" value={toolParamsText} onChange={(e) => setToolParamsText(e.target.value)} />
-          </Field>
-          {!isValidJsonOrEmpty(toolParamsText) && <p className="text-xs text-bad">Parameters must be valid JSON, or left blank.</p>}
+          <ToolParamsEditor
+            state={toolParamsState}
+            onChange={setToolParamsState}
+            method={toolMethod}
+            engineType={(toolModalTarget ? findApi(toolModalTarget.apiId)?.engineType : undefined) ?? 'REST'}
+          />
+          {!isToolParamsValid(toolParamsState) && <p className="text-xs text-bad">Parameters are incomplete or invalid.</p>}
 
           <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
             <Button variant="secondary" size="sm" onClick={() => setToolModalTarget(null)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" disabled={!toolName || !isValidJsonOrEmpty(toolParamsText) || savingTool} onClick={saveToolModal}>
+            <Button variant="primary" size="sm" disabled={!toolName || !isToolParamsValid(toolParamsState) || savingTool} onClick={saveToolModal}>
               {savingTool ? 'Saving…' : toolModalTarget?.tool ? 'Save changes' : 'Save tool'}
             </Button>
           </div>
@@ -652,7 +649,7 @@ export default function ConnectorDetail() {
       >
         <div className="space-y-4">
           <Field label="Input (JSON)">
-            <Textarea rows={6} className="font-mono text-xs" value={runInputText} onChange={(e) => setRunInputText(e.target.value)} />
+            <CodeEditor lang="json" value={runInputText} onChange={setRunInputText} placeholder="{}" />
           </Field>
           <div className="flex justify-end gap-2 border-t border-border/10 pt-4">
             <Button variant="secondary" size="sm" onClick={() => setRunningToolTarget(null)}>
