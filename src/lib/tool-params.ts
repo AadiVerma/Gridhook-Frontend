@@ -17,10 +17,16 @@ export interface GraphQlVariableRow {
   description: string
 }
 
+export interface SoapHeaderRow {
+  id: string
+  name: string
+  value: string
+}
+
 export type ToolParamsFormState =
   | { engineType: 'REST'; rows: ToolParamRow[]; bodyJson: string }
   | { engineType: 'GRAPHQL'; variables: GraphQlVariableRow[]; operationText: string }
-  | { engineType: 'SOAP'; headerRows: ToolParamRow[]; bodyXml: string }
+  | { engineType: 'SOAP'; headerRows: SoapHeaderRow[]; bodyXml: string }
   | { engineType: 'RAW'; rawJson: string }
 
 let rowIdCounter = 0
@@ -43,6 +49,10 @@ export function createEmptyParamRow(base: Partial<ToolParamRow> = {}): ToolParam
 
 export function createEmptyVariableRow(): GraphQlVariableRow {
   return { id: newRowId(), name: '', type: 'String', required: false, description: '' }
+}
+
+export function createEmptySoapHeaderRow(): SoapHeaderRow {
+  return { id: newRowId(), name: '', value: '' }
 }
 
 export function createEmptyParamsState(engineType: BackendEngineType): ToolParamsFormState {
@@ -85,7 +95,32 @@ function toVariableRow(name: string, raw: unknown): GraphQlVariableRow {
   }
 }
 
-export function buildToolParameters(state: ToolParamsFormState): unknown {
+const placeholderPattern = /\{\{?([A-Za-z_][A-Za-z0-9_]*)\}\}?/g
+
+function extractPlaceholders(body: string): string[] {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const match of body.matchAll(placeholderPattern)) {
+    if (!seen.has(match[1])) {
+      seen.add(match[1])
+      names.push(match[1])
+    }
+  }
+  return names
+}
+
+function schemaFromPlaceholders(names: string[]) {
+  const properties: Record<string, unknown> = {}
+  for (const name of names) properties[name] = { type: 'string' }
+  return { type: 'object', properties, required: names }
+}
+
+export interface BuiltToolConfig {
+  parameters: unknown
+  endpointMapping?: Record<string, unknown>
+}
+
+export function buildToolParameters(state: ToolParamsFormState): BuiltToolConfig {
   switch (state.engineType) {
     case 'REST': {
       const parameters = state.rows.map((r) => ({
@@ -98,7 +133,7 @@ export function buildToolParameters(state: ToolParamsFormState): unknown {
       const trimmedBody = state.bodyJson.trim()
       const payload: Record<string, unknown> = { parameters }
       if (trimmedBody) payload.body = JSON.parse(trimmedBody)
-      return payload
+      return { parameters: payload }
     }
     case 'GRAPHQL': {
       const variables = Object.fromEntries(
@@ -106,22 +141,31 @@ export function buildToolParameters(state: ToolParamsFormState): unknown {
           .filter((v) => v.name)
           .map((v) => [v.name, { type: v.required ? `${v.type}!` : v.type, description: v.description }]),
       )
-      return { query: state.operationText, variables }
+      return { parameters: { query: state.operationText, variables } }
     }
     case 'SOAP': {
-      const headers = Object.fromEntries(
-        state.headerRows
-          .filter((r) => r.name)
-          .map((r) => [r.name, { type: r.type, required: r.required, description: r.description }]),
-      )
-      return { headers, body: state.bodyXml }
+      const headers = Object.fromEntries(state.headerRows.filter((r) => r.name.trim()).map((r) => [r.name.trim(), r.value]))
+      return {
+        parameters: schemaFromPlaceholders(extractPlaceholders(state.bodyXml)),
+        endpointMapping: { headers, envelopeTemplate: state.bodyXml },
+      }
     }
     case 'RAW':
-      return state.rawJson.trim() ? JSON.parse(state.rawJson) : {}
+      return { parameters: state.rawJson.trim() ? JSON.parse(state.rawJson) : {} }
   }
 }
 
-export function parseToolParameters(engineType: BackendEngineType, raw: unknown): ToolParamsFormState {
+function headerValueToString(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (isPlainObject(v)) {
+    for (const key of ['value', 'default', 'example']) {
+      if (typeof v[key] === 'string') return v[key]
+    }
+  }
+  return v === undefined || v === null ? '' : String(v)
+}
+
+export function parseToolParameters(engineType: BackendEngineType, raw: unknown, endpointMapping?: unknown): ToolParamsFormState {
   try {
     if (engineType === 'REST') {
       const obj = isPlainObject(raw) ? raw : {}
@@ -138,11 +182,15 @@ export function parseToolParameters(engineType: BackendEngineType, raw: unknown)
       return { engineType: 'GRAPHQL', variables, operationText: obj.query }
     }
     if (engineType === 'SOAP') {
-      const obj = isPlainObject(raw) ? raw : {}
-      if (obj.body !== undefined && typeof obj.body !== 'string') throw new Error('shape mismatch')
-      const headersObj = isPlainObject(obj.headers) ? obj.headers : {}
-      const headerRows = Object.entries(headersObj).map(([name, v]) => toRow({ ...(isPlainObject(v) ? v : {}), name, in: 'header' }))
-      return { engineType: 'SOAP', headerRows, bodyXml: typeof obj.body === 'string' ? obj.body : '' }
+      // The live envelope/headers live in endpointMapping — parameters is just the
+      // derived input schema. Fall back to the legacy parameters.{body,headers} shape
+      // for tools saved before endpointMapping existed.
+      const em = isPlainObject(endpointMapping) ? endpointMapping : {}
+      const legacy = isPlainObject(raw) ? raw : {}
+      const bodyXml = typeof em.envelopeTemplate === 'string' ? em.envelopeTemplate : typeof legacy.body === 'string' ? legacy.body : ''
+      const headersObj = isPlainObject(em.headers) ? em.headers : isPlainObject(legacy.headers) ? legacy.headers : {}
+      const headerRows = Object.entries(headersObj).map(([name, v]) => ({ id: newRowId(), name, value: headerValueToString(v) }))
+      return { engineType: 'SOAP', headerRows, bodyXml }
     }
   } catch {
     // fall through to RAW below

@@ -10,7 +10,7 @@ export type BackendEngineType = 'REST' | 'GRAPHQL' | 'SOAP'
 export type BackendAuthType = 'oauth2' | 'bearer' | 'api_key' | 'basic' | 'login_token' | 'none'
 
 export interface ConnectorListItem {
-  id: number
+  id: string
   name: string
   glyph: string
   description: string
@@ -35,9 +35,9 @@ interface ConnectorsStore {
   loading: boolean
   error: string | null
   refetch: () => Promise<void>
-  toggleConnector: (id: number, active: boolean) => Promise<void>
-  deleteConnector: (id: number) => Promise<void>
-  runHealthCheck: (id: number) => Promise<void>
+  toggleConnector: (id: string, active: boolean) => Promise<void>
+  deleteConnector: (id: string) => Promise<void>
+  runHealthCheck: (id: string) => Promise<void>
 }
 
 const ConnectorsContext = createContext<ConnectorsStore | null>(null)
@@ -79,17 +79,17 @@ export function ConnectorsProvider({ children }: { children: ReactNode }) {
     setConnectors((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
   }
 
-  async function toggleConnector(id: number, active: boolean) {
+  async function toggleConnector(id: string, active: boolean) {
     const updated = await api.post<ConnectorListItem>(`/connectors/${id}/toggle`, { active })
     replaceConnector(updated)
   }
 
-  async function deleteConnector(id: number) {
+  async function deleteConnector(id: string) {
     await api.delete(`/connectors/${id}`)
     setConnectors((prev) => prev.filter((c) => c.id !== id))
   }
 
-  async function runHealthCheck(id: number) {
+  async function runHealthCheck(id: string) {
     const updated = await api.post<ConnectorListItem>(`/connectors/${id}/health-check`)
     replaceConnector(updated)
   }

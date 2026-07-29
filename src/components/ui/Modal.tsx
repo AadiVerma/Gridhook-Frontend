@@ -1,6 +1,25 @@
 import { ReactNode, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+// Reference-counted so a modal closing while another is still open (e.g. a delete-confirm
+// stacked on top of an edit modal) doesn't prematurely re-enable the background app.
+let openModalCount = 0
+
+function acquireBackgroundLock() {
+  openModalCount += 1
+  document.body.style.overflow = 'hidden'
+  const appRoot = document.getElementById('root')
+  appRoot?.setAttribute('inert', '')
+  return () => {
+    openModalCount = Math.max(0, openModalCount - 1)
+    if (openModalCount === 0) {
+      document.body.style.overflow = ''
+      appRoot?.removeAttribute('inert')
+    }
+  }
+}
 
 export function Modal({
   open,
@@ -21,16 +40,21 @@ export function Modal({
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
+
+    // Marks the app behind the overlay inert. Without this, a select-all (Cmd/Ctrl+A) that
+    // doesn't land inside a focused input falls through to the whole document, and the
+    // blurred backdrop lets that background selection show through.
+    const releaseBackgroundLock = acquireBackgroundLock()
+
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
+      releaseBackgroundLock()
     }
   }, [open, onClose])
 
   if (!open) return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[8vh] sm:pt-[10vh]">
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div
@@ -55,6 +79,7 @@ export function Modal({
         )}
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

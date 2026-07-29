@@ -5,8 +5,8 @@ import { BackendEngineType, BackendAuthType, ConnectorListItem } from './connect
 export type ConnectorDetail = ConnectorListItem
 
 export interface Module {
-  id: number
-  organizationId: number
+  id: string
+  organizationId: string
   name: string
   slug: string
   description: string
@@ -17,9 +17,9 @@ export interface Module {
 }
 
 export interface ConnectorApi {
-  id: number
-  connectorId: number
-  groupId: number
+  id: string
+  connectorId: string
+  groupId: string | null
   name: string
   engineType: BackendEngineType
   baseUrl: string
@@ -36,15 +36,16 @@ export interface ModuleWithApis {
 }
 
 export interface Tool {
-  id: number
-  connectorApiId: number
-  groupId: number
+  id: string
+  connectorApiId: string
+  groupId: string | null
   engineType: BackendEngineType
   name: string
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   path: string
   description?: string
   parameters?: unknown
+  endpointMapping?: Record<string, unknown>
   status: string
   cached: boolean
   cacheTtlSeconds: number
@@ -75,7 +76,7 @@ export interface CreateApiInput {
   baseUrl: string
   authType: BackendAuthType
   specUrl?: string
-  groupId?: number
+  groupId?: string | null
   credentials?: CredentialsInput
 }
 
@@ -98,42 +99,59 @@ export interface CreateConnectorResult {
 }
 
 export const connectorApi = {
-  get: (id: number) => api.get<ConnectorDetail>(`/connectors/${id}`),
+  get: (id: string) => api.get<ConnectorDetail>(`/connectors/${id}`),
   create: (input: CreateConnectorInput) => api.post<CreateConnectorResult>('/connectors', input),
-  patch: (id: number, patch: Partial<{ name: string; description: string; status: string }>) =>
+  patch: (id: string, patch: Partial<{ name: string; description: string; status: string }>) =>
     api.patch<ConnectorDetail>(`/connectors/${id}`, patch),
-  toggle: (id: number, active: boolean) => api.post<ConnectorDetail>(`/connectors/${id}/toggle`, { active }),
-  healthCheck: (id: number) => api.post<ConnectorDetail>(`/connectors/${id}/health-check`),
-  delete: (id: number) => api.delete<void>(`/connectors/${id}`),
+  toggle: (id: string, active: boolean) => api.post<ConnectorDetail>(`/connectors/${id}/toggle`, { active }),
+  healthCheck: (id: string) => api.post<ConnectorDetail>(`/connectors/${id}/health-check`),
+  delete: (id: string) => api.delete<void>(`/connectors/${id}`),
 
-  listModules: (connectorId: number) => api.get<ModuleWithApis[]>(`/connectors/${connectorId}/modules`),
-  createModule: (connectorId: number, input: CreateModuleInput) =>
+  listModules: (connectorId: string) => api.get<ModuleWithApis[]>(`/connectors/${connectorId}/modules`),
+  createModule: (connectorId: string, input: CreateModuleInput) =>
     api.post<ModuleWithApis>(`/connectors/${connectorId}/modules`, input),
 
-  listApis: (connectorId: number) => api.get<ConnectorApi[]>(`/connectors/${connectorId}/apis`),
-  createApi: (connectorId: number, input: CreateApiInput) => api.post<ConnectorApi>(`/connectors/${connectorId}/apis`, input),
+  listApis: (connectorId: string) => api.get<ConnectorApi[]>(`/connectors/${connectorId}/apis`),
+  createApi: (connectorId: string, input: CreateApiInput) => api.post<ConnectorApi>(`/connectors/${connectorId}/apis`, input),
   patchApi: (
-    connectorId: number,
-    apiId: number,
-    patch: Partial<{ name: string; baseUrl: string; authType: BackendAuthType; isActive: boolean; groupId: number }>,
+    connectorId: string,
+    apiId: string,
+    patch: Partial<{ name: string; baseUrl: string; authType: BackendAuthType; isActive: boolean; groupId: string | null }>,
   ) => api.patch<ConnectorApi>(`/connectors/${connectorId}/apis/${apiId}`, patch),
-  putCredentials: (connectorId: number, apiId: number, input: CredentialsInput) =>
+  putCredentials: (connectorId: string, apiId: string, input: CredentialsInput) =>
     api.put<void>(`/connectors/${connectorId}/apis/${apiId}/credentials`, input),
 
-  listTools: (connectorId: number, apiId?: number) =>
+  listTools: (connectorId: string, apiId?: string) =>
     api.get<Tool[]>(`/connectors/${connectorId}/tools${apiId ? `?apiId=${apiId}` : ''}`),
   createTool: (
-    connectorId: number,
-    apiId: number,
-    input: { name: string; method: string; path: string; description?: string; parameters?: unknown; groupId?: number },
+    connectorId: string,
+    apiId: string,
+    input: {
+      name: string
+      method: string
+      path: string
+      description?: string
+      parameters?: unknown
+      endpointMapping?: Record<string, unknown>
+      groupId?: string | null
+    },
   ) => api.post<Tool>(`/connectors/${connectorId}/tools?apiId=${apiId}`, input),
   patchTool: (
-    connectorId: number,
-    toolId: number,
-    patch: Partial<{ name: string; method: string; path: string; description: string; parameters: unknown; cacheTtlSeconds: number; groupId: number }>,
+    connectorId: string,
+    toolId: string,
+    patch: Partial<{
+      name: string
+      method: string
+      path: string
+      description: string
+      parameters: unknown
+      endpointMapping: Record<string, unknown>
+      cacheTtlSeconds: number
+      groupId: string | null
+    }>,
   ) => api.patch<Tool>(`/connectors/${connectorId}/tools/${toolId}`, patch),
-  deleteTool: (connectorId: number, toolId: number) => api.delete<void>(`/connectors/${connectorId}/tools/${toolId}`),
-  runTool: (connectorId: number, toolId: number, input: unknown) =>
+  deleteTool: (connectorId: string, toolId: string) => api.delete<void>(`/connectors/${connectorId}/tools/${toolId}`),
+  runTool: (connectorId: string, toolId: string, input: unknown) =>
     api.post<unknown>(`/connectors/${connectorId}/tools/${toolId}/run`, input),
 }
 

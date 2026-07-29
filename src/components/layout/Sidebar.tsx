@@ -116,7 +116,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-raised/60"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-signal to-violet text-[11px] font-bold text-white">
-              {initials(user?.name ?? org?.name ?? '?')}
+              {initials(user?.name ?? org?.name ?? 'Workspace')}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-ink">{org?.name ?? 'Workspace'}</span>

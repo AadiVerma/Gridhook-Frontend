@@ -43,18 +43,18 @@ function errorMessage(err: unknown, fallback: string) {
 }
 
 interface TargetTool {
-  apiId: number
+  apiId: string
   tool: Tool
 }
 
 export default function ConnectorDetail() {
   const { id } = useParams()
-  const connectorId = Number(id)
+  const connectorId = id ?? ''
 
   const [connector, setConnector] = useState<ConnectorDetailModel | null>(null)
   const [modules, setModules] = useState<ModuleWithApis[]>([])
   const [unassignedApis, setUnassignedApis] = useState<ConnectorApi[]>([])
-  const [toolsByApi, setToolsByApi] = useState<Record<number, Tool[]>>({})
+  const [toolsByApi, setToolsByApi] = useState<Record<string, Tool[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,17 +82,17 @@ export default function ConnectorDetail() {
   }, [connectorId])
 
   useEffect(() => {
-    if (Number.isFinite(connectorId)) fetchAll()
+    if (connectorId) fetchAll()
   }, [connectorId, fetchAll])
 
-  const [runningId, setRunningId] = useState<number | null>(null)
-  const [runResult, setRunResult] = useState<{ apiId: number; tool: string; ok: boolean; detail?: string } | null>(null)
+  const [runningId, setRunningId] = useState<string | null>(null)
+  const [runResult, setRunResult] = useState<{ apiId: string; tool: string; ok: boolean; detail?: string } | null>(null)
   const [runningToolTarget, setRunningToolTarget] = useState<TargetTool | null>(null)
   const [runInputText, setRunInputText] = useState('{}')
 
   const [pendingDeleteTool, setPendingDeleteTool] = useState<TargetTool | null>(null)
 
-  const [toolModalTarget, setToolModalTarget] = useState<{ apiId: number; tool: Tool | null } | null>(null)
+  const [toolModalTarget, setToolModalTarget] = useState<{ apiId: string; tool: Tool | null } | null>(null)
   const [toolName, setToolName] = useState('')
   const [toolMethod, setToolMethod] = useState<Tool['method']>('GET')
   const [toolPath, setToolPath] = useState('')
@@ -103,7 +103,8 @@ export default function ConnectorDetail() {
 
   const [editingApi, setEditingApi] = useState<ConnectorApi | null>(null)
   const [editName, setEditName] = useState('')
-  const [editGroupId, setEditGroupId] = useState(0)
+  // '' is the "Unassigned" sentinel — real group ids are opaque encoded strings that can never be empty.
+  const [editGroupId, setEditGroupId] = useState('')
   const [editEngineType, setEditEngineType] = useState<BackendEngineType>('REST')
   const [editBaseUrl, setEditBaseUrl] = useState('')
   const [editAuthType, setEditAuthType] = useState<BackendAuthType>('oauth2')
@@ -122,7 +123,7 @@ export default function ConnectorDetail() {
   const [newModuleDescription, setNewModuleDescription] = useState('')
   const [savingModule, setSavingModule] = useState(false)
 
-  const [newApiGroupId, setNewApiGroupId] = useState<number | null | 'unassigned'>(null)
+  const [newApiGroupId, setNewApiGroupId] = useState<string | null | 'unassigned'>(null)
   const [newApiName, setNewApiName] = useState('')
   const [newApiEngineType, setNewApiEngineType] = useState<BackendEngineType>('REST')
   const [newApiBaseUrl, setNewApiBaseUrl] = useState('')
@@ -191,7 +192,7 @@ export default function ConnectorDetail() {
   function openEditApi(api: ConnectorApi) {
     setEditingApi(api)
     setEditName(api.name)
-    setEditGroupId(api.groupId ?? 0)
+    setEditGroupId(api.groupId ?? '')
     setEditEngineType(api.engineType)
     setEditBaseUrl(api.baseUrl)
     setEditAuthType(api.authType)
@@ -223,12 +224,12 @@ export default function ConnectorDetail() {
         name: editName,
         baseUrl: editBaseUrl,
         authType: editAuthType,
-        groupId: editGroupId,
+        groupId: editGroupId || null,
       })
       const credentials = buildEditCredentials()
       if (credentials) await connectorApi.putCredentials(connectorId, editingApi.id, credentials)
       applyApiUpdate(updated)
-      if (editGroupId !== (editingApi.groupId ?? 0)) await fetchAll()
+      if (editGroupId !== (editingApi.groupId ?? '')) await fetchAll()
       setEditingApi(null)
       toast.success('API settings saved')
     } catch (err) {
@@ -254,7 +255,7 @@ export default function ConnectorDetail() {
     }
   }
 
-  function openNewApi(groupId: number | 'unassigned') {
+  function openNewApi(groupId: string | 'unassigned') {
     setNewApiGroupId(groupId)
     setNewApiName('')
     setNewApiEngineType('REST')
@@ -302,11 +303,11 @@ export default function ConnectorDetail() {
     }
   }
 
-  function findApi(apiId: number): ConnectorApi | undefined {
+  function findApi(apiId: string): ConnectorApi | undefined {
     return modules.flatMap((g) => g.apis).concat(unassignedApis).find((a) => a.id === apiId)
   }
 
-  function runTool(apiId: number, tool: Tool) {
+  function runTool(apiId: string, tool: Tool) {
     setRunningToolTarget({ apiId, tool })
     setRunInputText('{}')
   }
@@ -334,7 +335,7 @@ export default function ConnectorDetail() {
     }
   }
 
-  function openNewTool(apiId: number) {
+  function openNewTool(apiId: string) {
     const engineType = findApi(apiId)?.engineType ?? 'REST'
     setToolModalTarget({ apiId, tool: null })
     setToolName('')
@@ -345,22 +346,22 @@ export default function ConnectorDetail() {
     setToolCacheTtl(0)
   }
 
-  function openEditTool(apiId: number, tool: Tool) {
+  function openEditTool(apiId: string, tool: Tool) {
     setToolModalTarget({ apiId, tool })
     setToolName(tool.name)
     setToolMethod(tool.method)
     setToolPath(tool.path)
     setToolDescription(tool.description ?? '')
-    setToolParamsState(parseToolParameters(tool.engineType, tool.parameters))
+    setToolParamsState(parseToolParameters(tool.engineType, tool.parameters, tool.endpointMapping))
     setToolCacheTtl(tool.cacheTtlSeconds)
   }
 
   async function saveToolModal() {
     if (!toolModalTarget) return
     const { apiId, tool } = toolModalTarget
-    let parameters: unknown
+    let built: ReturnType<typeof buildToolParameters>
     try {
-      parameters = buildToolParameters(toolParamsState)
+      built = buildToolParameters(toolParamsState)
     } catch {
       toast.error('Parameters must be valid JSON')
       return
@@ -373,7 +374,8 @@ export default function ConnectorDetail() {
           method: toolMethod,
           path: toolPath,
           description: toolDescription,
-          parameters,
+          parameters: built.parameters,
+          endpointMapping: built.endpointMapping,
           cacheTtlSeconds: toolCacheTtl,
         })
         setToolsByApi((prev) => ({ ...prev, [apiId]: (prev[apiId] ?? []).map((t) => (t.id === tool.id ? updated : t)) }))
@@ -384,7 +386,8 @@ export default function ConnectorDetail() {
           method: toolMethod,
           path: toolPath,
           description: toolDescription,
-          parameters,
+          parameters: built.parameters,
+          endpointMapping: built.endpointMapping,
         })
         setToolsByApi((prev) => ({ ...prev, [apiId]: [...(prev[apiId] ?? []), created] }))
         setConnector((prev) => (prev ? { ...prev, toolCount: prev.toolCount + 1 } : prev))
@@ -693,8 +696,8 @@ export default function ConnectorDetail() {
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
             </Field>
             <Field label="Module" hint="Move this API to a different module, or unassign it.">
-              <Select value={editGroupId} onChange={(e) => setEditGroupId(Number(e.target.value))}>
-                <option value={0}>Unassigned</option>
+              <Select value={editGroupId} onChange={(e) => setEditGroupId(e.target.value)}>
+                <option value="">Unassigned</option>
                 {modules.map(({ module }) => (
                   <option key={module.id} value={module.id}>
                     {module.name}

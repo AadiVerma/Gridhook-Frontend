@@ -5,20 +5,20 @@ export interface AuthUser {
   id: string
   name: string
   email: string
-  organizationId: number
+  organizationId: string
   role: 'Owner' | 'Admin' | 'Developer' | 'Viewer'
   status: 'active' | 'invited'
   lastActive: string
 }
 
 export interface AuthOrg {
-  id: number
+  id: string
   name: string
   slug: string
 }
 
 export interface OrgChoice {
-  id: number
+  id: string
   name: string
   slug: string
   role: string
@@ -47,7 +47,7 @@ interface AuthStore {
   user: AuthUser | null
   org: AuthOrg | null
   error: string | null
-  login: (email: string, password: string, organizationId?: number) => Promise<LoginResult>
+  login: (email: string, password: string, organizationId?: string) => Promise<LoginResult>
   register: (name: string, email: string, password: string, orgName: string) => Promise<void>
   logout: () => void
 }
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     hydrateSession().catch(clearSession)
   }, [clearSession, hydrateSession])
 
-  async function login(email: string, password: string, organizationId?: number): Promise<LoginResult> {
+  async function login(email: string, password: string, organizationId?: string): Promise<LoginResult> {
     setError(null)
     try {
       const body = organizationId ? { email, password, organizationId } : { email, password }

@@ -53,9 +53,9 @@ export default function Connectors() {
   const { connectors: items, loading, error, refetch, toggleConnector, deleteConnector, runHealthCheck } = useConnectorsStore()
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | BackendEngineType>('all')
-  const [openMenu, setOpenMenu] = useState<number | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<number | null>(null)
-  const [checkingId, setCheckingId] = useState<number | null>(null)
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [checkingId, setCheckingId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
   const [importName, setImportName] = useState('')
@@ -156,7 +156,7 @@ export default function Connectors() {
     setImporting(true)
     try {
       const params = new URLSearchParams({ format: 'openapi', ...(importName.trim() ? { name: importName.trim() } : {}) })
-      const result = await api.postRaw<{ connector: { id: number; name: string } }>(
+      const result = await api.postRaw<{ connector: { id: string; name: string } }>(
         `/connectors/import?${params.toString()}`,
         importText,
       )

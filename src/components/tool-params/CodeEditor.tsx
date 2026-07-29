@@ -2,8 +2,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { json } from '@codemirror/lang-json'
 import { xml } from '@codemirror/lang-xml'
 import { graphqlLanguageSupport } from 'cm6-graphql'
-import { oneDark } from '@codemirror/theme-one-dark'
-import { useTheme } from '@/lib/theme'
+import { appCodeTheme } from './codeEditorTheme'
 
 const extensionsByLang = {
   json: [json()],
@@ -22,17 +21,17 @@ export function CodeEditor({
   onChange: (value: string) => void
   placeholder?: string
 }) {
-  const { theme } = useTheme()
   return (
     <CodeMirror
       value={value}
       onChange={onChange}
       extensions={extensionsByLang[lang]}
-      theme={theme === 'dark' ? oneDark : 'light'}
+      theme={appCodeTheme}
       placeholder={placeholder}
       basicSetup={{ foldGutter: false }}
-      className="rounded-lg border border-border-strong/15 text-xs overflow-hidden"
-      height="160px"
+      className="rounded-lg border border-border-strong/15 text-xs"
+      minHeight="160px"
+      maxHeight="420px"
     />
   )
 }
