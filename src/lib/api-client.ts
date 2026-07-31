@@ -10,13 +10,16 @@ export class ApiError extends Error {
   status: number
   code: string
   field?: string
+  /** Server-side correlation id from the error envelope — the only handle support has, so surface it in error UI. */
+  requestId?: string
 
-  constructor(status: number, code: string, message: string, field?: string) {
+  constructor(status: number, code: string, message: string, field?: string, requestId?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.field = field
+    this.requestId = requestId
   }
 }
 
@@ -67,10 +70,38 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!res.ok) {
     const err = data?.error
-    throw new ApiError(res.status, err?.code ?? 'unknown_error', err?.message ?? res.statusText, err?.field)
+    throw new ApiError(res.status, err?.code ?? 'unknown_error', err?.message ?? res.statusText, err?.field, err?.requestId)
   }
 
   return data as T
+}
+
+/** For endpoints that return a file rather than JSON (e.g. audit-log CSV export). */
+async function requestBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {}
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+
+  const res = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, { headers })
+
+  if (res.status === 401) unauthorizedHandler?.()
+
+  if (!res.ok) {
+    // A failure still comes back as the usual JSON envelope, not a file.
+    let code = 'unknown_error'
+    let message = res.statusText
+    let requestId: string | undefined
+    try {
+      const err = JSON.parse(await res.text())?.error
+      code = err?.code ?? code
+      message = err?.message ?? message
+      requestId = err?.requestId
+    } catch {
+      // non-JSON body — keep the status text
+    }
+    throw new ApiError(res.status, code, message, undefined, requestId)
+  }
+
+  return res.blob()
 }
 
 export const api = {
@@ -84,4 +115,11 @@ export const api = {
   delete: <T,>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>) => request<T>(path, { ...options, method: 'DELETE' }),
   postRaw: <T,>(path: string, rawBody: string, options?: Omit<RequestOptions, 'method' | 'body' | 'rawBody'>) =>
     request<T>(path, { ...options, method: 'POST', rawBody }),
+  getBlob: (path: string) => requestBlob(path),
+}
+
+/** Uniform message for error UI — includes the requestId when the server sent one. */
+export function errorMessage(err: unknown, fallback: string) {
+  if (err instanceof ApiError) return err.requestId ? `${err.message} (request ${err.requestId})` : err.message
+  return fallback
 }

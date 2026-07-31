@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button'
 const steps = [
   { icon: Plug, title: 'Connect your first API', desc: 'Add a REST, GraphQL, SOAP, or database connector.', to: '/connectors/new', done: true },
   { icon: Wrench, title: 'Map tools', desc: 'Generate or hand-map MCP tools from your connector endpoints.', to: '/connectors', done: true },
-  { icon: Server, title: 'Create an MCP server', desc: 'Group connectors into an endpoint your AI client can call.', to: '/mcp-servers', done: false },
+  { icon: Server, title: 'Create an MCP server', desc: 'Bundle tool groups into an endpoint your AI client can call.', to: '/mcp-servers/new', done: false },
   { icon: Waypoints, title: 'Explore the knowledge graph', desc: 'See how entities across your connectors relate to each other.', to: '/knowledge-graph', done: false },
 ]
 

@@ -12,6 +12,7 @@ import ConnectorNew from '@/pages/ConnectorNew'
 import ConnectorDetail from '@/pages/ConnectorDetail'
 import Marketplace from '@/pages/Marketplace'
 import McpServers from '@/pages/McpServers'
+import McpServerNew from '@/pages/McpServerNew'
 import McpServerDetail from '@/pages/McpServerDetail'
 import KnowledgeGraph from '@/pages/KnowledgeGraph'
 import KgSkills from '@/pages/KgSkills'
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="/connectors/:id" element={<ConnectorDetail />} />
 
                 <Route path="/mcp-servers" element={<McpServers />} />
+                <Route path="/mcp-servers/new" element={<McpServerNew />} />
                 <Route path="/mcp-servers/:id" element={<McpServerDetail />} />
 
                 <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
