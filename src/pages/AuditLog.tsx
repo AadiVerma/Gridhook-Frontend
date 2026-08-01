@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Download, AlertTriangle } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, Download, AlertTriangle, ScrollText, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -170,10 +170,24 @@ export default function AuditLog() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  const hasActiveFilters =
+    status !== 'all' || connector !== 'all' || server !== 'all' || tool !== 'all' || !!from || !!to
+
   function updateFilter(apply: () => void) {
     apply()
     setPage(1)
     setExpanded(null)
+  }
+
+  function clearFilters() {
+    updateFilter(() => {
+      setStatus('all')
+      setConnector('all')
+      setServer('all')
+      setTool('all')
+      setFrom('')
+      setTo('')
+    })
   }
 
   async function exportCsv() {
@@ -195,6 +209,25 @@ export default function AuditLog() {
   }
 
   const dateRangeInvalid = (!!from && !toRfc3339(from)) || (!!to && !toRfc3339(to))
+  const isEmptyResult = !loading && !error && rows.length === 0
+
+  // Lets the empty state fill the viewport instead of sitting in a short box.
+  const emptyStateRef = useRef<HTMLDivElement>(null)
+  const [emptyStateHeight, setEmptyStateHeight] = useState(360)
+
+  useLayoutEffect(() => {
+    if (!isEmptyResult) return
+    function measure() {
+      const el = emptyStateRef.current
+      if (!el) return
+      const footer = document.querySelector('footer')
+      const footerHeight = footer?.getBoundingClientRect().height ?? 0
+      setEmptyStateHeight(Math.max(320, window.innerHeight - el.getBoundingClientRect().top - footerHeight))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [isEmptyResult])
 
   return (
     <AppShell
@@ -206,6 +239,16 @@ export default function AuditLog() {
         </Button>
       }
     >
+      {hasActiveFilters && (
+        <div className="mb-2 flex justify-end">
+          <button
+            onClick={clearFilters}
+            className="flex items-center gap-1 text-[11px] font-medium text-faint hover:text-signal"
+          >
+            <X size={11} /> Clear filters
+          </button>
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div>
           <Label>Status</Label>
@@ -279,6 +322,40 @@ export default function AuditLog() {
               <Button variant="secondary" size="sm" onClick={load}>
                 Retry
               </Button>
+            </div>
+          ) : isEmptyResult ? (
+            <div
+              ref={emptyStateRef}
+              className="relative flex items-center justify-center overflow-hidden rounded-2xl"
+              style={{ height: emptyStateHeight }}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-dotgrid" />
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ background: 'radial-gradient(55% 55% at 50% 45%, transparent, rgb(var(--canvas)) 100%)' }}
+              />
+              <div className="pointer-events-none absolute left-1/2 top-[45%] h-[320px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-signal/10 blur-[130px]" />
+
+              <div className="relative flex w-full max-w-sm flex-col items-center gap-4 px-6 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border-strong/15 bg-surface text-faint shadow-panel">
+                  <ScrollText size={22} />
+                </span>
+                <div>
+                  <p className="text-base font-semibold tracking-tight text-ink">
+                    {hasActiveFilters ? 'No log entries match your filters' : 'No tool invocations yet'}
+                  </p>
+                  <p className="mt-2 text-sm text-muted">
+                    {hasActiveFilters
+                      ? 'Try widening the date range or clearing a filter.'
+                      : 'Invocations show up here as your connectors run tools through Gridhook.'}
+                  </p>
+                </div>
+                {hasActiveFilters && (
+                  <Button variant="secondary" size="sm" onClick={clearFilters}>
+                    <X size={13} /> Clear filters
+                  </Button>
+                )}
+              </div>
             </div>
           ) : (
             <>
@@ -374,13 +451,6 @@ export default function AuditLog() {
                       </Fragment>
                     ))}
 
-                    {!loading && rows.length === 0 && (
-                      <tr>
-                        <td colSpan={8} className="px-4 py-12 text-center text-sm text-faint">
-                          No log entries match your filters.
-                        </td>
-                      </tr>
-                    )}
                   </tbody>
                 </table>
               </div>

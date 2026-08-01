@@ -559,34 +559,6 @@ export const initialConnectors: Connector[] = [
   },
 ]
 
-export interface MarketplaceAdapter {
-  id: string
-  name: string
-  glyph: string
-  tint: string
-  category: string
-  region: string
-  description: string
-  toolCount: number
-  authType: AuthType
-  installs: number
-}
-
-export const marketplaceAdapters: MarketplaceAdapter[] = [
-  { id: 'mk_salesforce', name: 'Salesforce', glyph: 'SF', tint: 'info', category: 'CRM', region: 'Global', description: 'Full CRUD across leads, opportunities, accounts, and custom objects.', toolCount: 28, authType: 'OAuth2', installs: 18400 },
-  { id: 'mk_jira', name: 'Jira', glyph: 'JR', tint: 'info', category: 'Dev Tools', region: 'Global', description: 'Create, transition, and query issues across projects and boards.', toolCount: 19, authType: 'OAuth2', installs: 15200 },
-  { id: 'mk_stripe', name: 'Stripe', glyph: 'S', tint: 'violet', category: 'Payments', region: 'Global', description: 'Charges, subscriptions, invoices, and payouts as callable tools.', toolCount: 14, authType: 'Bearer', installs: 22100 },
-  { id: 'mk_twilio', name: 'Twilio', glyph: 'TW', tint: 'bad', category: 'Communications', region: 'Global', description: 'Send SMS, place voice calls, and manage phone numbers.', toolCount: 9, authType: 'API Key', installs: 9800 },
-  { id: 'mk_postgres', name: 'PostgreSQL', glyph: 'PG', tint: 'info', category: 'Database', region: 'Self-hosted', description: 'Schema-aware SQL tool generation with read/write scoping.', toolCount: 9, authType: 'Basic', installs: 31200 },
-  { id: 'mk_gcal', name: 'Google Calendar', glyph: 'GC', tint: 'ok', category: 'Productivity', region: 'Global', description: 'Read and schedule events across shared calendars.', toolCount: 8, authType: 'OAuth2', installs: 26700 },
-  { id: 'mk_sap', name: 'SAP OData', glyph: 'SAP', tint: 'warn', category: 'ERP', region: 'EU', description: 'Expose SAP OData services as typed MCP tools.', toolCount: 12, authType: 'Basic', installs: 4100 },
-  { id: 'mk_zendesk', name: 'Zendesk', glyph: 'ZD', tint: 'ok', category: 'Support', region: 'Global', description: 'Tickets, macros, and satisfaction ratings as tools.', toolCount: 11, authType: 'API Key', installs: 8300 },
-  { id: 'mk_workday', name: 'Workday', glyph: 'WD', tint: 'violet', category: 'HR', region: 'US', description: 'Worker records, time-off, and org-chart lookups.', toolCount: 15, authType: 'OAuth2', installs: 2900 },
-  { id: 'mk_mongo', name: 'MongoDB', glyph: 'MG', tint: 'ok', category: 'Database', region: 'Self-hosted', description: 'Collection-aware query and aggregation tool builder.', toolCount: 7, authType: 'Basic', installs: 14600 },
-  { id: 'mk_shopify', name: 'Shopify', glyph: 'SF', tint: 'ok', category: 'Commerce', region: 'Global', description: 'Products, orders, and inventory as MCP tools.', toolCount: 16, authType: 'API Key', installs: 11400 },
-  { id: 'mk_linear', name: 'Linear', glyph: 'LN', tint: 'violet', category: 'Dev Tools', region: 'Global', description: 'Issues, cycles, and projects with GraphQL under the hood.', toolCount: 13, authType: 'API Key', installs: 7600 },
-]
-
 export type McpServerStatus = 'running' | 'stopped'
 
 export interface McpServer {
